@@ -3,7 +3,7 @@ import setuptools
 
 
 setuptools.setup(
-        name='utils',
+        name='nlputils',
         version='1.0.1',
         description='Haystack based utils for NLP',
         author='Data Service Center GIZ',
