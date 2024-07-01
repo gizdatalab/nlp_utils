@@ -12,6 +12,8 @@ from typing import Callable, Dict, List, Optional, Text, Tuple, Union
 import glob
 import numpy as np
 server_config='../axaserver/defaultConfig.json'
+this_dir, this_filename = os.path.split(__file__)
+server_config = os.path.join(this_dir, "defaultConfig.json")
 
 def get_config(configfile_path:str)->object:
     """
