@@ -1,5 +1,9 @@
 import setuptools
 
+install_requires = [
+        "pymupdf == 1.24.7",
+
+]
 
 
 setuptools.setup(
@@ -10,5 +14,5 @@ setuptools.setup(
         author_email='prashant.singh@giz.de',
         package_dir={"": "src"},
         packages=setuptools.find_packages(where='src'),  
-         #external packages as dependencies
+        install_requires = install_requires,
 )
