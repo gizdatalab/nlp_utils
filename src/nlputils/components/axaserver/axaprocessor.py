@@ -230,6 +230,36 @@ def get_json(url: str = "http://localhost:3001",
         return {'request_id': request_id, 'server_response': r.json()}
 
 
+def get_simplejson(url: str = "http://localhost:3001",
+               request_id: str = "", authfile:str = "")->dict:
+    """Get the status of a particular request using its ID
+
+    - request_id: The ID of the request to be queried with the server
+    - server: The server address where the query is to be made
+
+    """
+    if url != "http://localhost:3001":
+        configs = get_config(configfile_path= authfile)
+        try:
+            url = configs.get("axaserver","api")
+            token = configs.get("axaserver","token")
+            headers = {
+                        "Authorization": f"Bearer {token}"}
+        except Exception as e:
+            logging.warning(e) 
+    else:
+        headers = None
+    
+    if request_id == "":
+        raise Exception('No request ID provided')
+    
+    r = get('{}/api/v1/simple-json/{}'.format(url, request_id), headers=headers)
+    if r.text != "":
+        return r.json()
+    else:
+        return {'request_id': request_id, 'server_response': r.json()}
+    
+    
 def get_markdown(url: str = "http://localhost:3001",
                request_id: str = "", authfile:str = "")->dict:
     """Get the status of a particular request using its ID
@@ -369,15 +399,6 @@ def get_table(url: str = "http://localhost:3001",
             return r.text
     else:
         return r.text
-
-
-# def get_processedfiles(url: str = "http://localhost:3001",
-#                request_id: str = "", authfile:str = ""):
-#     r_json = get_json(url = url, request_id=request_id,authfile=authfile)
-#     pages = {}
-#     file_output = ParsrOutputInterpreter(r_json)
-#     for i in range(0,file_output.page_count):
-#         text_data = file_output.get_sorted_text(page_number=i, text_elements=[""])
 
 
 class ParsrOutputInterpreter(object):
@@ -529,14 +550,3 @@ class ParsrOutputInterpreter(object):
             final_text += self.__text_from_text_object(text_obj)
             text_list.append((text_obj["type"], final_text))
         return text_list
-
-    
-    
-
-
-
-    
-
-
-
-
