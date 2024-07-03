@@ -116,6 +116,59 @@ def send_doc(url="http://localhost:3001",
             logging.error(e)
 
 
+def send_documents_batch(batch: str,
+            url="http://localhost:3001", 
+            server_config:str=server_config, 
+            authfile:str = "",
+           ) -> list:
+        """
+        Send all the files inside a folder
+
+        Params
+        -------------
+        url: either the localhost or huggingface hosted server acceptible right now
+        folder: filder to be sent to server
+        server_config:filepath to configs for the axaserver to be sued for this 
+                      batch of files
+        authfile: private server on huggingface need auth-token
+
+        """
+        if url != "http://localhost:3001":
+            configs = get_config(configfile_path= authfile)
+            try:
+                url = configs.get("axaserver","api")
+                token = configs.get("axaserver","token")
+                headers = {
+                            "Authorization": f"Bearer {token}"}
+            except Exception as e:
+                logging.warning(e)
+                return
+        else:
+            headers = None
+
+        responses = []
+        # files = glob.glob(folder + "*")
+        # if len(files)  == 0:
+        #     logging.error("folder {} is empty".format(folder))
+        #     return
+            
+        # filemask = [check_input_file(file) for file in files]
+        # files = list(np.array(files)[filemask])
+
+        for file in batch:
+            packet = {
+                'file': (file, open(file, 'rb'), 'application/pdf'),
+                'config': (server_config, open(server_config, 'rb'), 'application/json'),
+            }
+            r = post(url + '/api/v1/document', headers=headers, files=packet)
+            responses.append({
+            'filename': os.path.basename(file),
+            'config': server_config,
+            'status_code': r.status_code,
+            'server_response': r.text})
+        return responses
+
+
 def send_documents_folder(folder: str,
             url="http://localhost:3001", 
             server_config:str=server_config, 
