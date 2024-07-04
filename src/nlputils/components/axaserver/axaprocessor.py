@@ -247,10 +247,12 @@ def get_status(url: str = "http://localhost:3001",
 
     r = get('{}/api/v1/queue/{}'.format(url, request_id), headers=headers)
 
-    return {
-        'request_id': request_id,
-        'server_response': json.loads(
-            r.text)}
+    return r
+
+    # return {
+    #     'request_id': request_id,
+    #     'server_response': json.loads(
+    #         r.text)}
 
 
 def get_json(url: str = "http://localhost:3001",
@@ -452,6 +454,45 @@ def get_table(url: str = "http://localhost:3001",
             return r.text
     else:
         return r.text
+
+
+def download_files(request_id, folder_location, filename):
+    if get_status(request_id=request_id).status_code == 201:
+        if not os.path.exists(folder_location + f"{request_id}/"):
+            os.makedirs(folder_location + f"{request_id}/")
+            new_path = folder_location + f"{request_id}/"
+
+            try:
+
+                r_markdown = get_markdown(request_id=request_id)
+                with open(new_path + f'{filename}.md', 'w') as file:
+                    file.write(r_markdown)
+                
+                r_text = get_text(request_id=request_id)
+                with open(new_path+f'{filename}.txt', 'w') as file:
+                    file.write(r_text)
+                
+                r_json = get_json(request_id=request_id)
+                with open(new_path + f'{filename}.json', 'w') as file:
+                    json.dump(r_json, file)  
+
+                r_simplejson = get_simplejson(request_id=request_id)
+                with open(new_path+f'{filename}.simple.json', 'w') as file:
+                    json.dump(r_simplejson, file)
+
+                tables_list = get_tables_list(request_id=request_id)
+                os.makedirs(folder_location + f"{request_id}/tables/")
+                new_path_table = folder_location + f"{request_id}/tables/"
+                for val in tables_list:
+                    df = get_table(request_id=request_id, page=val[0], table=val[1])
+                    df.to_csv(new_path_table+f"{val[0]}_{val[1]}.csv")
+                return new_path
+            except Exception as e:
+                logging.error(e)
+
+            
+        
+        else: logging.warning("folder already exists")
 
 
 class ParsrOutputInterpreter(object):
