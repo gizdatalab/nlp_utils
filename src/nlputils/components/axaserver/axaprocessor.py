@@ -644,3 +644,39 @@ class ParsrOutputInterpreter(object):
             final_text += self.__text_from_text_object(text_obj)
             text_list.append((text_obj["type"], final_text))
         return text_list
+
+def splitter(json_file, headings_level, filename, page_start=0):
+    index = 0
+    paragraphs = []
+    headings = []
+    table_of_contents = {}
+    text_formats = ['paragraph','list','table']
+
+    for item in json_file:
+        if item['type'] == 'heading':
+            if len(headings) <headings_level:
+                headings.append(item)
+            else:
+                headings.pop(0)
+                headings.append(item)
+        if item['type'] == 'tableOfContent':
+            table_of_contents['content'] = item['content']
+            table_of_contents['page'] = item['page']
+        if item['type'] in text_formats:
+            metadata = {}
+            if headings:
+                placeholder = []
+                for i,heading in enumerate(reversed(headings)):
+                    placeholder.append({f'headings_{i}':{'content':heading['content'], 'page':heading['page']}})
+            else:
+                placeholder = []
+            if placeholder:
+                metadata['headings'] =   placeholder   
+            else:
+                 metadata['headings'] = []              
+            metadata['page'] = item['page']
+            metadata['document_name'] = filename
+            paragraphs.append({'content':item['content'],'metadata':metadata})
+            metadata['index'] = index
+            index+=1
+    return {'paragraphs':paragraphs, 'table_of_contents':table_of_contents}
