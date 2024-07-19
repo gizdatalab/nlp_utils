@@ -646,7 +646,7 @@ class ParsrOutputInterpreter(object):
         return text_list
 
 
-class axaBatchProcessingLocal(container_id,config,files_list):
+class axaBatchProcessingLocal():
     """ done
     """
 
