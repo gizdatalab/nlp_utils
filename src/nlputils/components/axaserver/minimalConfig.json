@@ -3,14 +3,14 @@
   "extractor": {
     "pdf": "pdfminer",
     "ocr": "tesseract",
-    "language": ["eng","fra","deu","esp"]
+    "language": ["eng"]
   },
   "cleaner": [
     "drawing-detection",
     [
       "image-detection",
       {
-        "ocrImages": true
+        "ocrImages": false
       }
     ],
     "out-of-page-removal",
@@ -24,28 +24,6 @@
       "redundancy-detection",
       {
         "minOverlap": 0.5
-      }
-    ],
-    [
-      "table-detection",
-      {
-        "checkDrawings": true,
-        "runConfig": [
-          {
-            "pages": [],
-            "flavor": "lattice"
-          }
-        ]
-      }
-    ],
-    [
-      "table-detection-2",
-      {
-        "runConfig": [
-          {
-            "pages": []
-          }
-        ]
       }
     ],
     [
@@ -69,14 +47,6 @@
         "tolerance": 0.25
       }
     ],
-    [
-      "table-of-contents-detection",
-      {
-        "pageKeywords": ["pagina", "page", "pag"]
-      }
-    ],
-    "ml-heading-detection",
-    "list-detection",
     "hierarchy-detection"
   ],
   "output": {

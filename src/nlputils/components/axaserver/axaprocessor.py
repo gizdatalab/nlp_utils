@@ -10,7 +10,10 @@ from io import StringIO
 import logging
 from typing import Callable, Dict, List, Optional, Text, Tuple, Union
 import glob
+import time
 import numpy as np
+import docker
+client = docker.from_env()
 server_config='../axaserver/defaultConfig.json'
 this_dir, this_filename = os.path.split(__file__)
 server_config = os.path.join(this_dir, "defaultConfig.json")
@@ -186,18 +189,6 @@ def send_documents_folder(folder: str,
         authfile: private server on huggingface need auth-token
 
         """
-        if url != "http://localhost:3001":
-            configs = get_config(configfile_path= authfile)
-            try:
-                url = configs.get("axaserver","api")
-                token = configs.get("axaserver","token")
-                headers = {
-                            "Authorization": f"Bearer {token}"}
-            except Exception as e:
-                logging.warning(e)
-                return
-        else:
-            headers = None
 
         responses = []
         files = glob.glob(folder+"*")
@@ -208,17 +199,9 @@ def send_documents_folder(folder: str,
         filemask = [check_input_file(file) for file in files]
         files = list(np.array(files)[filemask])
 
-        for file in files:
-            packet = {
-                'file': (file, open(file, 'rb'), 'application/pdf'),
-                'config': (server_config, open(server_config, 'rb'), 'application/json'),
-            }
-            r = post(url + '/api/v1/document', headers=headers, files=packet)
-            responses.append({
-            'filename': os.path.basename(file),
-            'config': server_config,
-            'status_code': r.status_code,
-            'server_response': r.text})
+        responses = send_documents_batch(batch=files,url=url,
+                                         server_config=server_config,
+                                         authfile=authfile)
         return responses
 
 
@@ -495,6 +478,23 @@ def download_files(request_id, folder_location, filename):
         else: logging.warning("folder already exists")
 
 
+def get_serverconfig(config_type):
+    config_list  = ['default','largepdf','minimal','reduced','ocr_reduced','ocr']
+    config_map = {'default':os.path.join(this_dir, "defaultConfig.json"),
+                  'largepdf':os.path.join(this_dir, "largePDFConfig.json"),
+                  'minimal':os.path.join(this_dir, "minimalConfig.json"),
+                  'reduced':os.path.join(this_dir, "reducedNoHeadingConfig.json"),
+                  'ocr_reduced':os.path.join(this_dir, "OCRNoTableConfig.json"),
+                  'ocr':os.path.join(this_dir, "OCRConfig.json")}
+
+    if config_type not in config_list:
+        logging.error(f"config acceptable values are {config_list}")
+        return None
+    else:
+        server_file = config_map[config_type]
+        return server_file
+
+
 class ParsrOutputInterpreter(object):
     """Functions to interpret Parsr's resultant JSON file, enabling
     access to the underlying document content
@@ -644,6 +644,93 @@ class ParsrOutputInterpreter(object):
             final_text += self.__text_from_text_object(text_obj)
             text_list.append((text_obj["type"], final_text))
         return text_list
+
+
+class axaBatchProcessingLocal(container_id,config,files_list):
+    """ done
+    """
+
+    def __init__(self,container_id:str = '', 
+                 config:str = 'default',
+                 files_list = []):
+        """Constructor for the class
+
+        - object: the Parsr JSON file to be loaded
+        """
+        logging.basicConfig(level=logging.DEBUG,
+                            format='%(name)s - %(levelname)s - %(message)s')
+        
+        self.batch_files = None
+        self.server_file = None
+        self.container_id = None
+        
+        if container_id == '':
+            logging.error("Container ID required")
+        else:
+            self.container_id = container_id
+        
+        server_file = get_serverconfig(config)
+        if server_file:
+            self.server_file = server_file
+
+        if len(files_list) == 0:
+            logging.error("pass the non-empty files list")
+        else:
+            self.batch_files = files_list
+    
+    def set_batch_params(self, batch_size:int=5, batch_wait_time:int=300):
+        self.index_end = len(self.batch_files)
+        self.batch_start = 0
+        self.batch_size = batch_size
+        self.batch_end = self.batch_start + self.batch_size
+        self.batch_id = 0
+        self.sleep_time = batch_wait_time
+    
+    def processing(self,save_to_folder:str = ''):
+        if not os.path.exists(save_to_folder):
+            os.makedirs(save_to_folder) 
+        
+
+        while self.index_end > self.batch_start:
+            if self.batch_end <=self.index_end:
+                batch_file = self.batch_files[self.batch_start:self.batch_end]
+            else:
+                batch_file = self.batch_files[self.batch_start:]
+            # send the batch
+            batch = f"batch_{self.batch_id}"
+            batch_post = send_documents_batch(batch=batch_file,server_config=self.serverfile)
+            df = pd.DataFrame(batch_post)
+
+            jsonfile = df.to_json(orient="records")
+            parsed = json.loads(jsonfile)
+            with open(f'{save_to_folder}{batch}.json', 'w') as file:
+                json.dump(parsed, file, indent=4)
+
+            time.sleep(self.sleep_time)
+
+            df['status'] = df.apply(lambda x: get_status(request_id=x['server_response'])\
+                                    .status_code if x['status_code']==202 else None,axis=1 )
+            
+            root_folder = f"{save_to_folder}{batch}/"
+            df['path_to_docs'] = df.apply(lambda x: download_files(x['server_response'],root_folder,
+                                        os.path.splitext(os.path.basename(x['filename']))[0]),axis=1)
+            
+
+            jsonfile = df.to_json(orient="records")
+            parsed = json.loads(jsonfile)
+            with open(f'{save_to_folder}{batch}.json', 'w') as file:
+                json.dump(parsed, file, indent=4)
+            
+            logging.info("batch",i,"done")
+            container = client.containers.get(self.container_id)
+            container.stop()
+            container.start()
+            self.batch_id +=1
+            self.batch_start = self.batch_end
+            self.batch_end = self.batch_start + self.batch_size
+            time.sleep(20)
+        logging.success("jobs comleted")
+            
 
 def splitter(json_file, headings_level, filename, page_start=0):
     index = 0

@@ -3,14 +3,14 @@
   "extractor": {
     "pdf": "pdfminer",
     "ocr": "tesseract",
-    "language": ["eng","fra","deu","esp"]
+    "language": ["eng"]
   },
   "cleaner": [
     "drawing-detection",
     [
       "image-detection",
       {
-        "ocrImages": true
+        "ocrImages": false
       }
     ],
     "out-of-page-removal",
@@ -69,13 +69,6 @@
         "tolerance": 0.25
       }
     ],
-    [
-      "table-of-contents-detection",
-      {
-        "pageKeywords": ["pagina", "page", "pag"]
-      }
-    ],
-    "ml-heading-detection",
     "list-detection",
     "hierarchy-detection"
   ],
