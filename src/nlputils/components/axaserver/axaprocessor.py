@@ -495,7 +495,7 @@ def get_serverconfig(config_type):
         return server_file
 
 
-class ParsrOutputInterpreter(object):
+class ParsrOutputInterpreter:
     """Functions to interpret Parsr's resultant JSON file, enabling
     access to the underlying document content
     """
@@ -646,7 +646,7 @@ class ParsrOutputInterpreter(object):
         return text_list
 
 
-class axaBatchProcessingLocal():
+class axaBatchProcessingLocal:
     """ done
     """
 
