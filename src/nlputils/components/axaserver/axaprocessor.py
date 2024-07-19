@@ -650,13 +650,17 @@ class axaBatchProcessingLocal:
     """ done
     """
 
-    def __init__(self,container_id:str = '', 
-                 config:str = 'default',
-                 files_list = []):
-        """Constructor for the class
+    def __init__(self,container_id:str='',
+                 config:str='default',
+                 batch_files:list=[]):
+        """
 
         - object: the Parsr JSON file to be loaded
         """
+        # self.batch_files = batch_files
+        # self.config = config
+        # self.container_id = container_id
+        
         logging.basicConfig(level=logging.DEBUG,
                             format='%(name)s - %(levelname)s - %(message)s')
         
@@ -673,10 +677,10 @@ class axaBatchProcessingLocal:
         if server_file:
             self.server_file = server_file
 
-        if len(files_list) == 0:
+        if len(batch_files) == 0:
             logging.error("pass the non-empty files list")
         else:
-            self.batch_files = files_list
+            self.batch_files = batch_files
     
     def set_batch_params(self, batch_size:int=5, batch_wait_time:int=300):
         self.index_end = len(self.batch_files)
@@ -698,7 +702,7 @@ class axaBatchProcessingLocal:
                 batch_file = self.batch_files[self.batch_start:]
             # send the batch
             batch = f"batch_{self.batch_id}"
-            batch_post = send_documents_batch(batch=batch_file,server_config=self.serverfile)
+            batch_post = send_documents_batch(batch=batch_file,server_config=self.server_file)
             df = pd.DataFrame(batch_post)
 
             jsonfile = df.to_json(orient="records")
@@ -721,7 +725,7 @@ class axaBatchProcessingLocal:
             with open(f'{save_to_folder}{batch}.json', 'w') as file:
                 json.dump(parsed, file, indent=4)
             
-            logging.info("batch",i,"done")
+            logging.info("batch",self.batch_id,"done")
             container = client.containers.get(self.container_id)
             container.stop()
             container.start()
