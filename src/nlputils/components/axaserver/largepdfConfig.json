@@ -55,7 +55,6 @@
         "maxMarginPercentage": 8
       }
     ],
-    "link-detection",
     "words-to-line-new",
     [
       "reading-order-detection",
@@ -78,29 +77,7 @@
     ],
     "ml-heading-detection",
     "list-detection",
-    "page-number-detection",
-    "hierarchy-detection",
-    [
-      "regex-matcher",
-      {
-        "isCaseSensitive": true,
-        "isGlobal": true,
-        "queries": [
-          {
-            "label": "Car",
-            "regex": "([A-Z]{2}\\-[\\d]{3}\\-[A-Z]{2})"
-          },
-          {
-            "label": "Age",
-            "regex": "(\\d+)[ -]*(ans|jarige)"
-          },
-          {
-            "label": "Percent",
-            "regex": "([\\-]?(\\d)+[\\.\\,]*(\\d)*)[ ]*(%|per|percent|pourcent|procent)"
-          }
-        ]
-      }
-    ]
+    "hierarchy-detection"
   ],
   "output": {
     "granularity": "word",
