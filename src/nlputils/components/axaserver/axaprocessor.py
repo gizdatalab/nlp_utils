@@ -733,7 +733,7 @@ class axaBatchProcessingLocal:
             self.batch_start = self.batch_end
             self.batch_end = self.batch_start + self.batch_size
             time.sleep(20)
-        logging.success("jobs comleted")
+        logging.info("jobs completed")
             
 
 def splitter(json_file, headings_level, filename, page_start=0):
