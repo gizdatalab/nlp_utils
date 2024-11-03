@@ -3,7 +3,7 @@
   "extractor": {
     "pdf": "pdfminer",
     "ocr": "tesseract",
-    "language": ["eng","fra","deu","esp"]
+    "language": ["eng","deu"]
   },
   "cleaner": [
     "drawing-detection",

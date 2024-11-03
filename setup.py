@@ -1,7 +1,10 @@
 import setuptools
 
 install_requires = [
-        "pymupdf == 1.24.7",
+        "pymupdf == 1.24.12",
+        "pymupdf4llm == 0.0.17",
+        "docx2pdf == 0.1.8",
+        "docker == 7.1.0",
 
 ]
 
