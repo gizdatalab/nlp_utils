@@ -11,7 +11,7 @@ import glob
 import time
 import numpy as np
 import docker
-from ....nlputils.utils import check_if_imagepdf, get_config
+from ....nlputils.utils import check_if_imagepdf, get_config, get_files
 server_config='../axaserver/defaultConfig.json'
 this_dir, this_filename = os.path.split(__file__)
 server_config = os.path.join(this_dir, "defaultConfig.json")
@@ -629,6 +629,10 @@ class axaBatchProcessingLocal:
         Params
         ------------
         - save_to_folder: the local of folder where to store all the outputs
+
+        Return 
+        -----------
+        df: dataframe with info on each file
         """
 
         if not os.path.exists(save_to_folder):
@@ -691,8 +695,17 @@ class axaBatchProcessingLocal:
             # sleep time to allow the container to be up and running
             time.sleep(20)
         logging.info("jobs completed")
-        
+        batch_files = glob.glob(save_to_folder+'tmp/*.json')
+        df = pd.concat([pd.read_json(file) for file in batch_files], ignore_index=True)
+        df['simple_json_download_successful'] = df.apply(lambda x: 
+                                                os.path.isfile(x['path_to_docs']+"/"+
+                                                    os.path.splitext(x['filename'])[0] +".simple.json" ) 
+                                                if x['path_to_docs'] is not None else False,
+                                                axis=1)
 
+        return df
+
+        
 class ParsrOutputInterpreter:
     """Functions to interpret Parsr's resultant JSON file, enabling
     access to the underlying document content

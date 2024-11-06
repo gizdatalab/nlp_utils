@@ -36,16 +36,18 @@ def get_page_count(file_path:str)->int | None:
         return None
 
 
-def get_files(root_folder:str,file_extensions=['pdf','docx'])->dict | None:
+def get_files(root_folder:str,file_extensions=['pdf','docx'], recursive=True)->dict | None:
     """returns the files with extension provided in the root folder, 
-        does the search recursively
+        use recursive flag to do search recursively or not
        
         Params
         ----------
-        root_folder: root directory on which the file search will be carried out 
-                    recursively including sub-directories
-        file_extensions: file-extensions which will be considered in root dir, if the 
+        - root_folder: root directory on which the file search will be carried out 
+                    by defualt will do recursively including sub-directories
+        - file_extensions: file-extensions which will be considered in root dir, if the 
                     file_extensions = "*" is given then all files will be considered
+        - recursive: to search recursively in sub-dir or not, defualt =True  
+
 
         Return
         --------
@@ -54,10 +56,10 @@ def get_files(root_folder:str,file_extensions=['pdf','docx'])->dict | None:
     """
     try:
         if file_extensions == "*":
-            file_list = glob.glob(f'{root_folder}/**/*', recursive=True)
+            file_list = glob.glob(f'{root_folder}/**/*', recursive=recursive)
             return {'allfiles':file_list}
         else:
-            file_list = {f:glob.glob(f'{root_folder}/**/*.{f}', recursive=True) for f in file_extensions}
+            file_list = {f:glob.glob(f'{root_folder}/**/*.{f}', recursive=recursive) for f in file_extensions}
             return file_list
     except Exception as e:
         logging.error(e)
@@ -100,7 +102,7 @@ def convert_docxfiles(docx_list:list, pdf_path:str = ""):
     
     return pdf_list
 
-### delete this
+
 def get_config(configfile_path:str)->object:
     """
     configfile_path: file path of .cfg file
