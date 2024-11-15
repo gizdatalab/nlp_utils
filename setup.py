@@ -5,6 +5,7 @@ install_requires = [
         "pymupdf4llm == 0.0.17",
         "docx2pdf == 0.1.8",
         "docker == 7.1.0",
+        "gliner == 0.2.13",
 
 ]
 

@@ -2,3 +2,5 @@ src/__pycache__
 src/nlputils/__pycache__
 src/nlputils/components/__pycache__
 src/nlputils/components/axaserver/__pycache__
+src/nlputils/components/pymupdf_util/__pycache__
+src/nlputils/components/ner/__pycache__
