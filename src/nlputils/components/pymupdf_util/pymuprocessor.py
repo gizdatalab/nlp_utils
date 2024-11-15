@@ -5,8 +5,6 @@ import logging
 from ....nlputils.utils import get_files, open_file
 from langchain.text_splitter import MarkdownTextSplitter
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-# location where you need to add all langauge supports
-#os.environ["TESSDATA_PREFIX"] = "C:/Users/Prashant/AppData/Local/Programs/Tesseract-OCR/tessdata"
 
 def create_markdown(filepath, folder_location, filename):
     """
