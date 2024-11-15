@@ -10,8 +10,9 @@ from typing import Callable, Dict, List, Optional, Text, Tuple, Union, Literal
 import glob
 import time
 import numpy as np
+import re
 import docker
-from ....nlputils.utils import check_if_imagepdf, get_config
+from ....nlputils.utils import check_if_imagepdf, get_config, get_files, open_file, get_page_count
 server_config='../axaserver/defaultConfig.json'
 this_dir, this_filename = os.path.split(__file__)
 server_config = os.path.join(this_dir, "defaultConfig.json")
@@ -29,7 +30,7 @@ def check_input_file(file_path:str)->bool:
         if os.path.isfile(file_path):
             if (extension_type == '.pdf') & check_if_imagepdf(file_path):
                 logging.warning(f"""{file_path} is of type imagepdf and using inbuilt 
-                        tesseract-ocr (eng). Suggest to use the useOCR module instead""")
+                        tesseract-ocr""")
             return True
         else:
             logging.error("File not found")
@@ -601,7 +602,8 @@ class axaBatchProcessingLocal:
             self.batch_files = batch_files
 
     
-    def set_batch_params(self, batch_size:int=5, batch_wait_time:int=300):
+    def set_batch_params(self, batch_size:int=5, batch_wait_time:int=300, dynamic_wait_time:bool = False,
+                         dynamic_multiplier=9):
         """
         Set the parameters to be used for batch processing
 
@@ -620,6 +622,8 @@ class axaBatchProcessingLocal:
         self.batch_end = self.batch_start + self.batch_size
         self.batch_id = 0
         self.sleep_time = batch_wait_time
+        self.dynamic_wait_time = dynamic_wait_time
+        self.dynamic_multiplier = dynamic_multiplier
     
     
     def processing(self,save_to_folder:str = ''):
@@ -629,6 +633,10 @@ class axaBatchProcessingLocal:
         Params
         ------------
         - save_to_folder: the local of folder where to store all the outputs
+
+        Return 
+        -----------
+        df: dataframe with info on each file
         """
 
         if not os.path.exists(save_to_folder):
@@ -642,6 +650,7 @@ class axaBatchProcessingLocal:
         except Exception as e:
             logging.error("docker not activated")
 
+
         
         # loop thorugh the documents list, create the batch and process them
         while self.index_end > self.batch_start:
@@ -651,51 +660,225 @@ class axaBatchProcessingLocal:
                 batch_file = self.batch_files[self.batch_start:]
             # send the batch to server
             batch = f"batch_{self.batch_id}"
-            batch_post = send_documents_batch(batch=batch_file,server_config=self.server_file)
-            # create the dataframe of repsonses and save it as batch file
-            # batch_id is auto-generated sequentially these batches will be saved in tmp folder
-            # within the 'save_to_folder' directory
-            df = pd.DataFrame(batch_post)
-            jsonfile = df.to_json(orient="records")
-            parsed = json.loads(jsonfile)
-            with open(f'{save_to_folder}tmp/{batch}.json', 'w') as file:
-                json.dump(parsed, file, indent=4)
-
-            # wait time for inner batch to be processed
-            time.sleep(self.sleep_time)
-
-            # get status code of succesfully accepted request
-            df['status'] = df.apply(lambda x: get_status(request_id=x['server_response'])\
-                                    .status_code if x['status_code']==202 else None,axis=1 )
             
-            # download inner batch and save to tmp sub-dir in 'save_to_folder' location
-            root_folder = f"{save_to_folder}tmp/{batch}/"
-            df['path_to_docs'] = df.apply(lambda x: download_files(x['server_response'],root_folder,
-                                        os.path.splitext(os.path.basename(x['filename']))[0]),axis=1)
-            jsonfile = df.to_json(orient="records")
-            parsed = json.loads(jsonfile)
-            with open(f'{save_to_folder}tmp/{batch}.json', 'w') as file:
-                json.dump(parsed, file, indent=4)
-    
-            logging.info("batch",self.batch_id,"done")
+            if os.path.isdir(f'{save_to_folder}tmp/{batch}'):
+                logging.warning(f'{save_to_folder}tmp/{batch}  exists')
+                self.batch_id +=1
+                self.batch_start = self.batch_end
+                self.batch_end = self.batch_start + self.batch_size
+            else:
+                batch_post = send_documents_batch(batch=batch_file,server_config=self.server_file)
+                # create the dataframe of repsonses and save it as batch file
+                # batch_id is auto-generated sequentially these batches will be saved in tmp folder
+                # within the 'save_to_folder' directory
+                df = pd.DataFrame(batch_post)
+                jsonfile = df.to_json(orient="records")
+                parsed = json.loads(jsonfile)
+                with open(f'{save_to_folder}tmp/{batch}.json', 'w') as file:
+                    json.dump(parsed, file, indent=4)
 
-            # restart the container to clear cache
-            container = client.containers.get(self.container_id)
-            container.stop()
-            container.start()
+                # wait time for inner batch to be processed
+                if self.dynamic_wait_time == False:
+                    time.sleep(self.sleep_time)
+                else:
+                    page_count = max([get_page_count(f) for f in batch_file])
+                    time.sleep(page_count*self.dynamic_multiplier)
 
-            # increase the batch iteration value and update related values
-            self.batch_id +=1
-            self.batch_start = self.batch_end
-            self.batch_end = self.batch_start + self.batch_size
-            # sleep time to allow the container to be up and running
-            time.sleep(20)
-        logging.info("jobs completed")
+                # get status code of succesfully accepted request
+                df['status'] = df.apply(lambda x: get_status(request_id=x['server_response'])\
+                                        .status_code if x['status_code']==202 else None,axis=1 )
+                
+                # download inner batch and save to tmp sub-dir in 'save_to_folder' location
+                root_folder = f"{save_to_folder}tmp/{batch}/"
+                df['path_to_docs'] = df.apply(lambda x: download_files(x['server_response'],root_folder,
+                                            os.path.splitext(os.path.basename(x['filename']))[0]),axis=1)
+                jsonfile = df.to_json(orient="records")
+                parsed = json.loads(jsonfile)
+                with open(f'{save_to_folder}tmp/{batch}.json', 'w') as file:
+                    json.dump(parsed, file, indent=4)
         
+                logging.info("batch",self.batch_id,"done")
+
+                # restart the container to clear cache
+                container = client.containers.get(self.container_id)
+                container.stop()
+                container.start()
+
+                # increase the batch iteration value and update related values
+                self.batch_id +=1
+                self.batch_start = self.batch_end
+                self.batch_end = self.batch_start + self.batch_size
+                # sleep time to allow the container to be up and running
+                time.sleep(20)
+        logging.info("jobs completed")
+        batch_files = glob.glob(save_to_folder+'tmp/*.json')
+        df = pd.concat([pd.read_json(file) for file in batch_files], ignore_index=True)
+        df = df.replace({float('nan'): None})
+        df['simple_json_download_successful'] = df.apply(lambda x: 
+                                                os.path.isfile(x['path_to_docs']+"/"+
+                                                    os.path.splitext(x['filename'])[0] +".simple.json" ) 
+                                                if x['path_to_docs'] is not None else False,
+                                                axis=1)
+
+        return df
+
+
+def create_axa_batches(df):
+    """
+    returns the batches based on page_count thresholds [page_count<=10, 10<page_count<=25,
+    25<page_count<=50, 50<page_count<=100, page_count>100]
+
+    Returns
+    ---------------
+    placeholder:dic where  key = 'verysmall'|'small'|'medium'|'large'|'verlarge', 
+            value = [dataframe of file list,minibatch size,minibatch wait time, config type to be used]
+    
+    """
+    partition_thresholds = {'verysmall':[10,10,120,'defaut'],'small':[25,10,300,'default'],'medium':[50,8,600,'default'],'large':[150,5,600,'largepdf'],}
+    nan_df = df[df.page_count.isna()]
+    df = df[df.page_count.notna()].reset_index(drop=True)
+    placeholder= {}
+    for key, val in partition_thresholds.items():
+        placeholder[key] = [df[df.page_count <=val[0]].reset_index(drop=True),val[1],val[2]]
+        df = df[df.page_count >val[0]].reset_index(drop=True)
+    
+    # for very large batch size select the dynamic wait time option i.e why wait-time is passed None
+    placeholder['verylarge'] = [pd.concat([nan_df,df],ignore_index=True),3,None,'largepdf']
+
+    return placeholder
+
+
+def simple_json_parsr(filepath):
+    """
+    takes filepath and returns a well formated output from simple-json file
+
+    Return:
+    -----------------------
+    page_wise_doc: Dictionary with two pairs of key,values
+        - page_list:list of page, where each page = {'page':page number,
+                                                    'content':sorted list of elements}
+                                where element = {'type':type of element like table/paragraph etc,
+                                                    'content': actual content of element,
+                                                    'level':Optional, heading level,
+                                                    'columns':Optional, column header for table}
+        - type_list: list of type of unique elements found for whole doc
+            
+
+    """
+    simple_json = open_file(filepath)
+    
+    def page_wise_contruct(simple_json):
+        """
+        takes simple-json and contruct list of pages
+        """
+        pages= []
+        type_list = set()
+        page = {}
+        for i in simple_json: 
+            if page:
+                if page['page'] == i['page']+1:
+                    type_list.add(i['type'])
+                    del i['page']
+                    page['content'].append(i)
+                else:
+                    pages.append(page)
+                    page={'page':i['page']+1,'content':[]}
+                    type_list.add(i['type'])
+                    del i['page']
+                    page['content'].append(i)
+            else:
+            
+                page={'page':i['page']+1,'content':[]}
+                type_list.add(i['type'])
+                del i['page']
+                page['content'].append(i)
+        return {'page_list':pages,'unique_elements_type':type_list}
+    
+    page_wise_doc = page_wise_contruct(simple_json)
+    pages= page_wise_doc['page_list']
+
+    def check_column_header(string_list):
+        """
+        check if the first entry in content type table is valid column header or not 
+        returns tuple (bool,listofstring)
+
+        """
+        match = [bool(re.search(r'\*\*(.*?)\*\*', str(text))) for text in string_list]
+        if sum(match)/len(match)>0.6:
+            return True, [re.sub(r'\*\*', '', str(text)) for text in string_list]
+        else:
+            return False, [re.sub(r'\*\*', '', str(text)) for text in string_list]
+        
+    def table_format(pages):
+        """
+        iterate through pages, and if table exist then perform formatting in two respects:
+        1. if the column header is not defiend then fetch the column header from previous page
+        2. Drop the irrelvant(NA) rows/columns
+
+        """
+        page_cache= 0
+        table_cache= []
+        for page in pages:
+            for element in page['content']:
+                if element['type'] == 'table':
+                    # check if proper column header,axaparsr table headers exis as list of 
+                    # bold markdown strings
+                    if_col_header, col_header = check_column_header(element['content'][0])
+                    if if_col_header:
+                        # add separate element[key]
+                        element['columns'] = col_header
+                        # remove item 0 as this is now column header
+                        element['content'].pop(0)
+                        table_cache = col_header
+                        page_cache = page['page']
+                    else:
+                        # if not proper column header exist, then check if len of column headers
+                        # in table in previous table is of same length.
+                        if ((page['page'] == page_cache +1) & (len(table_cache)==len(col_header))):
+                            # assign the column headers from previous cached results
+                            element['columns'] = table_cache
+                            page_cache = page['page']
+                        else:
+                            # if none works then just add dummy column names
+                            element['columns'] = [f'column_{i}' for i in range(len(col_header)) ]
+                            table_cache = col_header
+                            page_cache = page['page']
+        # once more loop through to clean the table for NA/nan
+        for page in pages:
+            for element in page['content']:
+                if element['type'] == 'table':
+                    tmp = pd.DataFrame(data = element['content'],columns=element['columns'])
+                    tmp.dropna(axis=0, how='all',inplace=True)
+                    tmp.dropna(axis=1, how='all',inplace=True)
+                    element['columns'] = list(tmp.columns)
+                    element['content'] = tmp.values.tolist()
+        return pages
+
+    pages = table_format(pages)
+    page_wise_doc['page_list'] = pages
+
+    return page_wise_doc 
+
+
+def get_pagewise_text(filepath):
+    """constructs page wise raw text from simple-json, 
+    returns the list of dictionary with page_number and content """
+
+    tmp = simple_json_parsr(filepath)
+    page_wise_output = tmp['page_list']
+    
+    for page in page_wise_output:
+        tmp = []
+        for element in page['content']:
+            tmp.append(str(element['content']))
+        page['content'] = "\n".join(tmp)
+
+    return page_wise_output
+
 
 class ParsrOutputInterpreter:
-    """Functions to interpret Parsr's resultant JSON file, enabling
-    access to the underlying document content
+    """Functions to interpret Parsr's raw JSON file (not simple json), enabling
+    access to the underlying document content 
     """
 
     def __init__(self, object=None):
@@ -843,66 +1026,6 @@ class ParsrOutputInterpreter:
         return text_list
 
 
-def splitter(json_file, headings_level, filename, page_start=0, formats = ['paragraph','list','table']):
-    index = 0
-    paragraphs = []
-    headings = []
-    table_of_contents = []
-
-    for item in json_file:
-        if item['type'] == 'heading':
-            if len(headings) <headings_level:
-                headings.append(item)
-            else:
-                headings.pop(0)
-                headings.append(item)
-        if item['type'] == 'tableOfContent':
-            table_of_contents.append({'content':item['content'],
-                                      'page':item['page']})
-        if item['type'] in formats:
-            metadata = {}
-            if headings:
-                placeholder = []
-                for i,heading in enumerate(reversed(headings)):
-                    placeholder.append({f'headings_{i}':{'content':heading['content'], 'page':heading['page']}})
-            else:
-                placeholder = []
-            if placeholder:
-                metadata['headings'] =  placeholder   
-            else:
-                 metadata['headings'] = []              
-            metadata['page'] = item['page']
-            metadata['document_name'] = filename
-            paragraphs.append({'content':item['content'],'metadata':metadata})
-            metadata['type'] = item['type']
-            metadata['index'] = index
-            index+=1
-    
-    return {'paragraphs':paragraphs, 'table_of_contents':table_of_contents}
-
-
-def table_sanitize(df, token_limit = 400):
-    print(df)
-    placeholder = []
-    def sanitize_table(df=df,token_limit = token_limit):
-        df['token_count'] = None
-        for i in range(len(df)):
-            df.loc[i,'token_count'] =  len(" ".join(str(x) for x in list(df.loc[[i]].values.flatten())).split())
-            df = df[df.token_count !=0].reset_index(drop=True)
-        df['agg_token_count'] = df.token_count.cumsum()
-        if df.iloc[-1]['agg_token_count'] <= token_limit:
-            placeholder.append(df)
-            return
-        else:
-            index_val = list(filter(lambda i: i > token_limit, df.agg_token_count.to_list()))[0]
-            index_val = df.agg_token_count.to_list().index(index_val)
-            placeholder.append(df.iloc[:index_val,:])
-            sanitize_table(df.iloc[index_val:,:].reset_index(drop=True))
-            return
-    sanitize_table()
-    return placeholder
-
-
 def get_tables_markdown(tables_path, filename, sanitize =False, count_limit = 400):
     tables = glob.glob(tables_path+ "*")
     if not sanitize:
@@ -929,24 +1052,3 @@ def get_tables_markdown(tables_path, filename, sanitize =False, count_limit = 40
                                     'document_name':filename,'headings':[],'type':'table'}})
     
     return placeholder
-
-# def paragraph_sanitize(paragraphs, lower_threshold, upper_threshold, tokenizer):
-#     new_paragraphs = []
-#     for para in paragraphs:
-#         tokenized_para = 
-#         if len(tokenizer.encode(str(para['content']))) > lower_threshold:
-#             new_paragraphs.append(para)
-#         if len()
-#         if para['metadata']['headings']:
-#             headings_content = [val['content'] for key,val in para['metadata']['headings'].items()]
-        
-        
-
-        
-        # files = glob.glob(folder + "*")
-        # if len(files)  == 0:
-        #     logging.error("folder {} is empty".format(folder))
-        #     return
-            
-        # filemask = [check_input_file(file) for file in files]
-        # files = list(np.array(files)[filemask])
