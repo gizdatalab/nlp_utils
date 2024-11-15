@@ -3,7 +3,7 @@
   "extractor": {
     "pdf": "pdfjs",
     "ocr": "tesseract",
-    "language": ["eng"]
+    "language": ["eng","deu"]
   },
   "cleaner": [
     "drawing-detection",

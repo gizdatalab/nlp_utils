@@ -4,8 +4,10 @@ import configparser
 import glob
 import docx2pdf
 import pandas as pd
+import json
 import os
 from tqdm import tqdm
+import re
 
 def check_if_imagepdf(file_path:str)->bool | None:  
     """
@@ -103,6 +105,12 @@ def convert_docxfiles(docx_list:list, pdf_path:str = ""):
     return pdf_list
 
 
+def open_file(filepath):
+    with open(filepath) as file:
+        simple_json = json.load(file)
+    return simple_json
+
+
 def get_config(configfile_path:str)->object:
     """
     configfile_path: file path of .cfg file
@@ -116,3 +124,36 @@ def get_config(configfile_path:str)->object:
         return config
     except:
         logging.warning("config file not found")
+
+
+def is_gibberish(text):
+    """ Function to check if a text is gibberish
+    """
+    if len(text) == 0:
+        return True
+ 
+    # Calculate the ratio of non-alphanumeric characters to total characters
+    non_alpha_ratio = len(re.findall(r'\W', text)) / len(text)
+   
+    # Calculate the ratio of whitespace characters to total characters
+    whitespace_ratio = len(re.findall(r'\s', text)) / len(text)
+ 
+    # Check for the presence of common English and German words
+    common_words = {
+        'the', 'be', 'to', 'of', 'and', 'a', 'in', 'that', 'have', 'I',  # English words
+        'der', 'die', 'und', 'in', 'den', 'von', 'zu', 'mit', 'das', 'auf', 'ist'  # German words
+    }
+    words = set(re.findall(r'\b\w+\b', text.lower()))  # Find words using regex
+    if not words:
+        return True
+ 
+    common_word_ratio = len(common_words.intersection(words)) / len(words) if words else 0
+   
+    # Check average word length
+    word_lengths = [len(word) for word in words]
+    avg_word_length = sum(word_lengths) / len(word_lengths) if word_lengths else 0
+   
+    # Heuristic: adjust thresholds as needed
+    if non_alpha_ratio > 0.5 or avg_word_length > 30 or whitespace_ratio > 0.3:
+        return True
+    return False
