@@ -6,7 +6,8 @@ install_requires = [
         "docx2pdf == 0.1.8",
         "docker == 7.1.0",
         "gliner == 0.2.13",
-
+        "langchain == 0.2.6",
+        "langchain-text-splitters == 0.2.4",
 ]
 
 

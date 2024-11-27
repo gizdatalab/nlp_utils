@@ -392,7 +392,7 @@ def get_table(url: str = "http://localhost:3001",
         if page is None or table is None:
             raise Exception('No Page or Table number provided')
         else:
-            r = get('{}/api/v1/csv/{}/{}/{}'.format(url,request_id,page,table))
+            r = get('{}/api/v1/csv/{}/{}/{}'.format(url,request_id,page,table),headers=headers)
 
             if r.text != "":
                 try:
@@ -460,6 +460,7 @@ def send_documents_batch(batch: list,
 
 
 def download_files(request_id, folder_location, filename,authfile= ""):
+
     if authfile =="":
         if get_status(request_id=request_id).status_code == 201:
             if not os.path.exists(folder_location + f"{request_id}/"):
@@ -722,6 +723,126 @@ class axaBatchProcessingLocal:
 
         return df
 
+
+class axaBatchProcessingHF:
+    def __init__(self,authfile,
+                 config:Literal['default','ocr','largepdf','minimal','reduced','ocr_reduced']='default',
+                 batch_files:list=[]):
+        """
+        Initialize axaBatchProcessingLocal with a list of documents and container id of 
+        axaparsr to process the documents in semi-automated manner.
+
+        Params
+        -------------
+        - container_id: ID of the container running axaparsr locally
+        - config: axaparsr server config to be applied to the whole documents set
+        - batch_files: list of all documents to be processed
+        """
+        
+        logging.basicConfig(level=logging.DEBUG,
+                            format='%(name)s - %(levelname)s - %(message)s')
+        
+        # initialize the class variables
+        self.batch_files = None
+        self.server_file = None
+        self.authfile = authfile
+        
+
+        if len(batch_files) == 0:
+            logging.error("pass the non-empty files list")
+        else:
+            self.batch_files = batch_files
+        
+        server_file = get_serverconfig(config)
+        if server_file:
+            self.server_file = server_file
+        
+    
+    def set_batch_params(self, batch_size:int=10, batch_wait_time:int=120):
+        """
+        Set the parameters to be used for batch processing
+
+        Params
+        ---------------
+        - batch_size: this will be size of inner small batches to process the list of 
+                    documents the optimal size depends on memory and number of cores being
+                    used by axaparsr
+        - batch_wait_time: this will be wait time till inner batch will be allowed to be 
+                    processed by axaparsr, till second batch is pushed 
+                    (before the next batch is pushed, the container is restarted)
+        """
+        self.batch_size = batch_size
+        self.sleep_time = batch_wait_time
+    
+    def _get_batch_status(response_file, authfile):
+        for f in response_file:
+            server_status = get_status(url=None, authfile=authfile, request_id=f['server_response'])
+            f['status'] = server_status.status_code
+        return response_file
+
+    def processing(self, save_to_folder:str = ''):
+        if not os.path.exists(save_to_folder):
+            os.makedirs(save_to_folder)
+        if not os.path.exists(save_to_folder+'tmp/'):
+            os.makedirs(save_to_folder+'tmp/')
+
+        df_placeholder = []    
+        current_batch = []
+
+        while self.batch_files:
+        # Add files to the current batch until it's full or there are no more files to process
+            while len(current_batch) < self.batch_size and self.batch_files:
+                r = send_doc(url="",file_path=self.batch_files[0],server_config=self.server_file,
+                                        authfile=self.authfile)
+                r['file_path'] = self.batch_files[0]
+                current_batch.append(r)
+                self.batch_files.pop(0)
+
+            # wait time 
+            time.sleep(self.sleep_time)
+            # Simulate processing of some files in the batch
+            current_batch = self._get_batch_status(current_batch,self.authfile)
+            for i,f in enumerate(current_batch):
+                if f['status'] == 201:
+                    current_batch[i]['path_to_docs'] = download_files(f['server_response'],save_to_folder + 'tmp/',
+                                                    os.path.splitext(os.path.basename(f['filename']))[0], authfile=self.authfile)
+                    df_placeholder.append(current_batch[i])
+                    current_batch.pop(i)
+            
+            with open(save_to_folder + 'tmp/hf_batch_files.json', 'w') as file:
+                json.dump(df_placeholder, file, indent=4)
+                
+            # Add more files to the batch if it's not full
+            while len(current_batch) < self.batch_size and self.batch_files:
+                r = send_doc(url="",file_path=self.batch_files[0],server_config=self.server_file,
+                                            authfile=self.authfile)
+                r['file_path'] = self.batch_files[0]
+                current_batch.append(r)
+                self.batch_files.pop(0)
+        logging.info("total files processed:", len(df_placeholder))
+        logging.info("waiting for last batch")
+
+        while current_batch:
+            for i,f in enumerate(current_batch):
+                if f['status'] == 201:
+                    current_batch[i]['path_to_docs'] = download_files(f['server_response'],save_to_folder + 'tmp/',
+                                                    os.path.splitext(os.path.basename(f['filename']))[0], authfile=self.authfile)
+                    df_placeholder.append(current_batch[i])
+                    current_batch.pop(i)
+            time.sleep(self.sleep_time)
+        
+        logging.info("jobs completed")
+        for f in df_placeholder:
+            f['simple_json_download_successful'] = os.path.isfile(f['path_to_docs']+"/"+
+                                            os.path.splitext(f['filename'])[0] +".simple.json" ) 
+
+        with open(save_to_folder + 'tmp/hf_batch_files.json', 'w') as file:
+            json.dump(df_placeholder, file, indent=4)   
+
+        logging.info("jobs completed") 
+
+        return pd.DataFrame(df_placeholder)
+        
 
 def create_axa_batches(df):
     """
