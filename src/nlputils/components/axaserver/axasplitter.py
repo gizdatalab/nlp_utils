@@ -65,7 +65,7 @@ def paragraph_sanitize(paragraphs, lower_threshold, upper_threshold):
     # iterate through the paragraphs list
     for para in paragraphs:
         # if element type is paragraph then sanitize it
-        if para['metadata']['type'] =='paragraph':
+        if (para['metadata']['type'] =='paragraph') or (para['metadata']['type'] =='heading'):
             # get simple token list for paragraph
             para_tokens = str(para['content']).split()
             # check for upper threshold
@@ -79,7 +79,7 @@ def paragraph_sanitize(paragraphs, lower_threshold, upper_threshold):
                 else:
                     if len(new_paragraphs)>0:
                         # only merge if previous element is also 'paragraph'
-                        if new_paragraphs[-1]['metadata']['type'] =='paragraph':
+                        if (new_paragraphs[-1]['metadata']['type'] =='paragraph') or (new_paragraphs[-1]['metadata']['type'] =='heading'):
                             # append the content and headings
                             new_paragraphs[-1]['content'] = new_paragraphs[-1]['content'] + " \n" + para['content']
                             new_paragraphs[-1]['metadata']['headings'].append(para['metadata']['headings'])

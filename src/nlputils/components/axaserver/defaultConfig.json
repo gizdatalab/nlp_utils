@@ -10,7 +10,7 @@
     [
       "image-detection",
       {
-        "ocrImages": false
+        "ocrImages": true
       }
     ],
     "out-of-page-removal",

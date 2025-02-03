@@ -746,6 +746,8 @@ class axaBatchProcessingHF:
         self.batch_files = None
         self.server_file = None
         self.authfile = authfile
+        self.df_placeholder = []
+        self.current_batch = []
         
 
         if len(batch_files) == 0:
@@ -773,10 +775,11 @@ class axaBatchProcessingHF:
         """
         self.batch_size = batch_size
         self.sleep_time = batch_wait_time
+        
     
-    def _get_batch_status(response_file, authfile):
+    def _get_batch_status(self,response_file):
         for f in response_file:
-            server_status = get_status(url=None, authfile=authfile, request_id=f['server_response'])
+            server_status = get_status(url=None, authfile=self.authfile, request_id=f['server_response'])
             f['status'] = server_status.status_code
         return response_file
 
@@ -786,62 +789,68 @@ class axaBatchProcessingHF:
         if not os.path.exists(save_to_folder+'tmp/'):
             os.makedirs(save_to_folder+'tmp/')
 
-        df_placeholder = []    
-        current_batch = []
 
         while self.batch_files:
         # Add files to the current batch until it's full or there are no more files to process
-            while len(current_batch) < self.batch_size and self.batch_files:
+            while len(self.current_batch) < self.batch_size and self.batch_files:
                 r = send_doc(url="",file_path=self.batch_files[0],server_config=self.server_file,
                                         authfile=self.authfile)
                 r['file_path'] = self.batch_files[0]
-                current_batch.append(r)
+                self.current_batch.append(r)
                 self.batch_files.pop(0)
 
             # wait time 
             time.sleep(self.sleep_time)
             # Simulate processing of some files in the batch
-            current_batch = self._get_batch_status(current_batch,self.authfile)
-            for i,f in enumerate(current_batch):
+            self.current_batch = self._get_batch_status(response_file=self.current_batch)
+            for i,f in enumerate(self.current_batch):
                 if f['status'] == 201:
-                    current_batch[i]['path_to_docs'] = download_files(f['server_response'],save_to_folder + 'tmp/',
+                    self.current_batch[i]['path_to_docs'] = download_files(f['server_response'],save_to_folder + 'tmp/',
                                                     os.path.splitext(os.path.basename(f['filename']))[0], authfile=self.authfile)
-                    df_placeholder.append(current_batch[i])
-                    current_batch.pop(i)
+                    self.df_placeholder.append(self.current_batch[i])
+                    self.current_batch.pop(i)
             
             with open(save_to_folder + 'tmp/hf_batch_files.json', 'w') as file:
-                json.dump(df_placeholder, file, indent=4)
+                json.dump(self.df_placeholder, file, indent=4)
                 
             # Add more files to the batch if it's not full
-            while len(current_batch) < self.batch_size and self.batch_files:
+            while len(self.current_batch) < self.batch_size and self.batch_files:
                 r = send_doc(url="",file_path=self.batch_files[0],server_config=self.server_file,
                                             authfile=self.authfile)
                 r['file_path'] = self.batch_files[0]
-                current_batch.append(r)
+                self.current_batch.append(r)
                 self.batch_files.pop(0)
-        logging.info("total files processed:", len(df_placeholder))
+            self.current_batch = self._get_batch_status(response_file=self.current_batch)
+            with open(save_to_folder + 'tmp/current_batch.json', 'w') as file:
+                json.dump(self.current_batch, file, indent=4)
+        logging.info("total files processed:", len(self.df_placeholder))
         logging.info("waiting for last batch")
 
-        while current_batch:
-            for i,f in enumerate(current_batch):
+        while self.current_batch:
+            self.current_batch = self._get_batch_status(response_file=self.current_batch)
+            for i,f in enumerate(self.current_batch):
                 if f['status'] == 201:
-                    current_batch[i]['path_to_docs'] = download_files(f['server_response'],save_to_folder + 'tmp/',
+                    self.current_batch[i]['path_to_docs'] = download_files(f['server_response'],save_to_folder + 'tmp/',
                                                     os.path.splitext(os.path.basename(f['filename']))[0], authfile=self.authfile)
-                    df_placeholder.append(current_batch[i])
-                    current_batch.pop(i)
+                    self.df_placeholder.append(self.current_batch[i])
+                    self.current_batch.pop(i)
+            with open(save_to_folder + 'tmp/current_batch.json', 'w') as file:
+                json.dump(self.current_batch, file, indent=4)
+            with open(save_to_folder + 'tmp/hf_batch_files.json', 'w') as file:
+                json.dump(self.df_placeholder, file, indent=4) 
             time.sleep(self.sleep_time)
         
         logging.info("jobs completed")
-        for f in df_placeholder:
+        for f in self.df_placeholder:
             f['simple_json_download_successful'] = os.path.isfile(f['path_to_docs']+"/"+
                                             os.path.splitext(f['filename'])[0] +".simple.json" ) 
 
         with open(save_to_folder + 'tmp/hf_batch_files.json', 'w') as file:
-            json.dump(df_placeholder, file, indent=4)   
+            json.dump(self.df_placeholder, file, indent=4)   
 
         logging.info("jobs completed") 
 
-        return pd.DataFrame(df_placeholder)
+        return pd.DataFrame(self.df_placeholder)
         
 
 def create_axa_batches(df):
