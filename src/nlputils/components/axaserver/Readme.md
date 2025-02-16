@@ -10,7 +10,7 @@
 - Performance:
    - The tool performs really good especially for complex document structure containing multi page running tables, tables within tables, long documents
    - Heading Detection is performed using the Machine learning module with level identifier of heading, but it seems to over classisy. This step probably is most time consuming step which is there in the tool and if not important can be configured off. More on Configuration [here](https://github.com/axa-group/Parsr/blob/master/docs/configuration.md). *NOTE:It cannot leverage the underlyin GPU to handle fast processing of Heading Detection ML module.*
-   - **It takes roughly 1 min for 10 pages on single core, and 2 min for 10 pages with OCR**. Most time consuming element inlcude Heading Detection > Table Detection. Since ML is involved in heading detection the processing doesnt scale linearly beyond 200 pages,however in testing even for 600 pages document it took around 1 hour which was expected.
+   - **It takes roughly 1 min for 10 pages on single core, and 2 min for 10 pages with OCR** (using defualt pdf extractor). Most time consuming element inlcude Heading Detection > Table Detection. Since ML is involved in heading detection the processing doesnt scale linearly beyond 200 pages,however in testing even for 600 pages document it took around 1 hour which was expected.
    - Memory issues: The tool built a complex json structure for document which can explode in intermediate process leading to memory crash, this leads to gibberish output for document. If passing 10 document on 10 cores CPU, make sure that you have atleast 16 GB RAM (each document size ~30-40 pages)
 
 # axaprocessor
@@ -19,6 +19,11 @@ These are functions build to work with axaparsr in simple manner.
 - there are individual functions to fetch the required output (format) for particular request-id
 - axaBatchProcessingLocal:Wrapper class which inherits all functions and does the processing in semi-automated manner on locally deployed server
 - axaBatchProcessingHF: Wrapper to work with axaparsr hosted provately on Hugging Face infra.
+- Some template config are added within the package:
+   - 'default': Standard config to start with
+   - 'largepdf': For document more than 200 pages size, or fast processing uses different pdf extractor
+   - 'minimal': Removes all document format identifyinfg component and focuses just on getting the text
+   - 'ocr': For Image PDFs
 
 
 Links and Resources from Parsr
