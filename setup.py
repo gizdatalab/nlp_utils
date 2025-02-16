@@ -1,6 +1,7 @@
 import setuptools
 
 install_requires = [
+        "docling == 2.17.0",
         "pymupdf == 1.24.11",
         "pymupdf4llm == 0.0.17",
         "docx2pdf == 0.1.8",
