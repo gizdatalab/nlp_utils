@@ -2,6 +2,7 @@ from docling.datamodel.base_models import ConversionStatus
 from docling.datamodel.document import ConversionResult
 from docling.datamodel.settings import settings
 from docling.document_converter import DocumentConverter, PdfFormatOption
+from docling.chunking import HybridChunker
 from docling.datamodel.pipeline_options import (
     AcceleratorDevice,
     AcceleratorOptions,
@@ -13,6 +14,7 @@ from docling.datamodel.pipeline_options import (
     TesseractOcrOptions,
 )
 from docling.datamodel.base_models import InputFormat
+from docling_core.types import DoclingDocument
 import logging
 import os
 import json
@@ -212,3 +214,30 @@ def useOCR(file_path, num_threads =8):
     filename = os.path.splitext(os.path.basename(file_path))[0]
 
     return result, filename
+
+def hybrid_chunking(folder_location,embed_model_id, max_tokens= 512):
+    filename = os.path.basename(folder_location)
+    doc_path = folder_location + "/" + filename + ".json"
+    try:
+        with Path(doc_path).open("r", encoding="utf-8") as fp:
+            doc_dict = json.load(fp)
+        doc = DoclingDocument.model_validate(doc_dict)
+    except Exception as e:
+        logging.error("corrupt")
+        return None
+    chunker = HybridChunker(tokenizer=embed_model_id, max_tokens=max_tokens)
+    chunk_iter = chunker.chunk(doc)
+    chunks = list(chunk_iter)
+    paragraphs = []
+    for i,chunk in enumerate(chunks):
+        ser_txt = chunker.serialize(chunk=chunk)
+        paragraphs.append({'content':ser_txt,
+                            'metadata':{'filename':filename,
+                                        'page':chunk.meta.doc_items[0].prov[0].page_no}})
+    
+    chunks_list = {'paragraphs':paragraphs}
+    with open(folder_location+ "/chunks.json", 'w') as file:
+        json.dump(chunks_list, file)
+
+    return folder_location+ "/chunks.json"
+    

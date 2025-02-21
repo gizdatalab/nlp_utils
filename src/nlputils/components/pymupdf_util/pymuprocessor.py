@@ -75,7 +75,7 @@ def useOCR_create_text(filepath, tessdata, folder_location, filename, dpi=300):
         logging.warning(f"file corrupt {filepath}")
         return None
 
-def create_chunks(folder_location, overlap=10, chunk_size=800, file_extension = 'md'):
+def create_chunks(folder_location, filename, overlap=10, chunk_size=800, file_extension = 'md', page_level_chunk = False):
     """
     read the files in folder-location and create_chunks using splitters from langchain
 
@@ -99,28 +99,38 @@ def create_chunks(folder_location, overlap=10, chunk_size=800, file_extension = 
     pages = pages[file_extension]
     # sort the pages
     pages.sort(key=lambda f: int(''.join(filter(str.isdigit, f))))
-    
-    # define the splitter type based on file_extension
-    if file_extension == 'md':
-        splitter = MarkdownTextSplitter(chunk_size=chunk_size, chunk_overlap=overlap)
+
+    if page_level_chunk == True:
+        for page in pages:
+            with open(page, 'r') as f:
+                chunk = f.read()
+            chunks_placeholder.append({'content':chunk, 
+                                'metadata':{'page':int(os.path.splitext(os.path.basename(page))[0]) + 1,
+                                'filename':filename}})
+
+        return {'paragraphs':chunks_placeholder}
     else:
-        splitter = RecursiveCharacterTextSplitter(
-                chunk_size=chunk_size,
-                chunk_overlap=overlap,
-                length_function=len,
-                is_separator_regex=False,
-            )
-    # iterate through the pages
-    for page in pages:
-        with open(page, 'r') as f:
-            markdown_string = f.read()
-        page_chunks = splitter.split_text(markdown_string)
-        # iterate through page_chunks
-        for j,chunk in enumerate(page_chunks):
-            chunks_placeholder.append({'content':chunk,
-                                       'metadata':{'page':os.path.splitext(os.path.basename(page))[0],
-                                                   'filename':folder_location}})    
-    return {'paragraphs':chunks_placeholder}
+        # define the splitter type based on file_extension
+        if file_extension == 'md':
+            splitter = MarkdownTextSplitter(chunk_size=chunk_size, chunk_overlap=overlap)
+        else:
+            splitter = RecursiveCharacterTextSplitter(
+                    chunk_size=chunk_size,
+                    chunk_overlap=overlap,
+                    length_function=len,
+                    is_separator_regex=False,
+                )
+        # iterate through the pages
+        for page in pages:
+            with open(page, 'r') as f:
+                markdown_string = f.read()
+            page_chunks = splitter.split_text(markdown_string)
+            # iterate through page_chunks
+            for j,chunk in enumerate(page_chunks):
+                chunks_placeholder.append({'content':chunk,
+                                        'metadata':{'page':int(os.path.splitext(os.path.basename(page))[0]) +1,
+                                                    'filename':filename}})    
+        return {'paragraphs':chunks_placeholder}
 
 
 
