@@ -24,8 +24,19 @@ from typing import Iterable
 import yaml
 
 
-def send_doc(file_path):
-    """ this is to process single file and get the doclingDocument"""
+def send_doc(file_path:str):
+    """ this is to process single file and get the doclingDocument
+
+    Params
+    -----------------
+    - file_path: the path to file
+    
+    Returns
+    ------------------
+    - result: DoclingDocument created by convertor
+    - filename
+
+      """
     try:
         source = file_path
         converter = DocumentConverter()
@@ -34,16 +45,35 @@ def send_doc(file_path):
         logging.warning(e)
         return
 
+    # extracting filename from filepath
     filename = os.path.splitext(os.path.basename(file_path))[0]
 
     return result, filename
 
-def get_tables(doclingDoc, folder_location, filename):
+def get_tables(doclingDoc:DoclingDocument, folder_location:str, filename:str):
     """use the putput from send_doc(Docling.Document) and then fetch the tables
-      from it"""
+      from it
+      
+    Params
+    ---------------------
+    - doclingDoc: this is DoclingDocument created using convertor for a prticular file
+    - folder_location: folder location where the output for a file will be saved.
+                        Only parent folder location required the sub-dir forfile will 
+                        be created
+                        Ex: pass folder location as "../folder1/", the output will be saved
+                          automatically to "../folder1/filename/tables/"
+    - filename
+
+
+    Returns
+    -------------------------
+    save_to_folder: The output is saved and the location for the tables folder is returned
+
+    """
     # we will save the tables in separate folder
     save_to_folder = Path(folder_location + filename + "/tables")
     try:
+        # create the tables folder
         save_to_folder.mkdir(parents=True, exist_ok=True)
     except Exception as e:
         logging.warning(e)
@@ -63,7 +93,23 @@ def get_tables(doclingDoc, folder_location, filename):
     return save_to_folder
 
 def save_output(doclingDoc, folder_location, filename):
-    """ use Docling.Document all the outputs including markdown, text,tables etc """
+    """ use Docling.Document all the outputs including markdown, text,tables etc
+    
+     Params
+     ------------------------------ 
+     - doclingDoc: the docling.document created for a file using convertor
+     - folder_location: only the parent location of folder, sub-dir for file will 
+                        be created automatically.
+                        Ex: pass folder location as "../folder1/", but output will be saved
+                         to "../folder1/filename/"
+     - filename
+
+
+     Returns
+     ---------------------------
+     - save_to_folder: Folder where all the outputs are saved for a file
+     - tables_path: tables folder which is sub-dir in save_to_folder
+     """
     save_to_folder = Path(folder_location + filename)
     try:
         save_to_folder.mkdir(parents=True, exist_ok=True)
@@ -94,7 +140,7 @@ def save_output(doclingDoc, folder_location, filename):
     except Exception as e:
         logging.info(e)
 
-    # Export Document Tags format:
+    # Export Document Tags format: this gives a document structure info
     try:
         with (save_to_folder / f"{filename}.doctags").open("w", encoding="utf-8") as fp:
             fp.write(doclingDoc.document.export_to_document_tokens())
@@ -105,16 +151,33 @@ def save_output(doclingDoc, folder_location, filename):
     return save_to_folder, tables_path
 
 def export_documents(
-    conv_results: Iterable[ConversionResult],
-    output_dir,
+    conv_results: Iterable[ConversionResult],output_dir:str,
 ):
     """ uses the iterable output from docling for mutliple docs and save the output for 
-    all the documents """
+    all the documents 
+    
+    Params
+    -----------------------------
+    - conv_results: an iterator which contains the Docling.document output for each file in batch
+    - output_dir: the parent folder where output for ech file willbe saved
+                Ex: if output_dir = "../folder1/' the putputs for file are saved to 
+                '../folder1/filename1/', '../folder1/filename2/' etc
+        
+    Returns
+    --------------------------
+    - success_count: the count of succesfully converted files
+    - partial_success_count: the count of partially succesfully converted docs
+    - failure_count: the count of failed conversion
+    - folder_info: the folder location of eahc converted docs
+    
+        
+    """
 
     # placeholder for tracking
     success_count = 0
     failure_count = 0
     partial_success_count = 0
+    folder_info = []
     
     # iterate through the docling.documents for the documents
     for conv_res in conv_results:
@@ -125,6 +188,7 @@ def export_documents(
             # save the output from for particular doc
             a,b = save_output(doclingDoc=conv_res,folder_location=output_dir,
                         filename=doc_filename)
+            folder_info.append(a)
 
         elif conv_res.status == ConversionStatus.PARTIAL_SUCCESS:
             logging.info(
@@ -142,18 +206,42 @@ def export_documents(
         f"of which {failure_count} failed "
         f"and {partial_success_count} were partially converted."
     )
-    return success_count, partial_success_count, failure_count
+    return success_count, partial_success_count, failure_count, folder_info
 
-def batch_processing(file_list, output_dir, num_threads=8):
+def batch_processing(file_list:list, output_dir:str, num_threads=8):
+    """
+    take the file list and processes and saves the outputs of each file, recommended to use
+    for docx and normal pdf. For imagepdf use 'useOCR'
+
+    Params
+    ------------------------------
+    - file_list: the list of file-paths
+    - outout_dir: the folder location to save the output for the whole batch
+                Ex: if output_dir = "../folder1/' the putputs for file are saved to 
+                '../folder1/filename1/', '../folder1/filename2/' etc
+    - num_threads: Docling.Document cannot parallelize the document processing but you can 
+                    tell how many threads/logical-processors in CPU can be used, higher the
+                    number better the CPU utilization (but limits the usage of machine for
+                     other tasks)
+        
+    Returns
+    -------------------
+    chekc the Return for export_documents as it uses the same internally 
+
+    """
     logging.basicConfig(level=logging.INFO)
     """batch processing of multiple docs"""
     # device to be used, if GPU then will be used
     accelerator_options = AcceleratorOptions(
         num_threads=num_threads, device=AcceleratorDevice.AUTO
     )
+    # declaring the pipeline 
     pipeline_options = PdfPipelineOptions()
+    # adding the device accelration info
     pipeline_options.accelerator_options = accelerator_options
+    # if image then perform ocr
     pipeline_options.do_ocr = True
+    # to extract or not to extaract the table structural info 
     pipeline_options.do_table_structure = True
     pipeline_options.table_structure_options.do_cell_matching = True
 
@@ -170,8 +258,8 @@ def batch_processing(file_list, output_dir, num_threads=8):
         raises_on_error=False,  # to let conversion run through all and examine results at the end
     )
 
-
-    success_count, partial_success_count, failure_count = export_documents(
+    # calling Export_documents 
+    success_count, partial_success_count, failure_count, folder_info = export_documents(
         conv_results, output_dir
     )
 
@@ -180,10 +268,29 @@ def batch_processing(file_list, output_dir, num_threads=8):
             f"The example failed converting {failure_count} on {len(file_list)}."
         )
 
-    return success_count, partial_success_count, failure_count
+    return success_count, partial_success_count, failure_count, folder_info
 
 
-def useOCR(file_path, num_threads =8):
+def useOCR(file_path, num_threads=8):
+    """
+    this is specifically to be used for image pdfs, however for imagepdfs its good to do 
+    the iteration one at a time
+
+    Params
+    ---------------------
+    - file_path: path of file
+    - num_threads: Docling.Document cannot parallelize the document processing but you can 
+                    tell how many threads/logical-processors in CPU can be used, higher the
+                    number better the CPU utilization (but limits the usage of machine for
+                     other tasks)
+
+
+    Returns
+    ---------------------------
+    - result: Docling.Document for a file
+    - filename 
+    
+    """
     
     input_doc = Path(file_path)
     # device to be used, if GPU then will be used
@@ -197,11 +304,14 @@ def useOCR(file_path, num_threads =8):
     #ocr_options = TesseractCliOcrOptions(lang=["auto"])
     ocr_options = EasyOcrOptions(force_full_page_ocr=True)
 
+    # declare the pipieline for OCR with OCR options
     pipeline_options = PdfPipelineOptions(
         do_ocr=True, force_full_page_ocr=True, ocr_options=ocr_options
     )
+    # update the accelarotor options for OCR, use GPU
     pipeline_options.accelerator_options = accelerator_options
 
+    # define the convertor
     converter = DocumentConverter(
         format_options={
             InputFormat.PDF: PdfFormatOption(
@@ -209,15 +319,40 @@ def useOCR(file_path, num_threads =8):
             )
         }
     )
-
+    
+    # convert doc
     result = converter.convert(input_doc)
+    # extract filename
     filename = os.path.splitext(os.path.basename(file_path))[0]
 
     return result, filename
 
-def hybrid_chunking(folder_location,embed_model_id, max_tokens= 512):
+def hybrid_chunking(folder_location,embed_model_id, max_tokens= None):
+    """
+    this is adaptation of hybrid chunking (headings) imlemented for docling.Document
+
+    Params
+    --------------------
+    - folder_location: folder location where output for a file is saved
+                        Ex: "../folder1/filename1" notice no "/" in the end
+    - embed_model_id: model id from hugging face to be used for emebdding (the tokenizer of same
+                        model will be used to do the chunking)
+    - max_tokens: while the max_token info can be fetched from model id but you can set the 
+                    token limit for chunking too
+    
+                    
+    Returns
+    -------------
+    - location to the chunks file
+    
+    """
+
+    # extracting filename
     filename = os.path.basename(folder_location)
+
+    # definign path for docling.Document within folder
     doc_path = folder_location + "/" + filename + ".json"
+    # read file
     try:
         with Path(doc_path).open("r", encoding="utf-8") as fp:
             doc_dict = json.load(fp)
@@ -225,9 +360,16 @@ def hybrid_chunking(folder_location,embed_model_id, max_tokens= 512):
     except Exception as e:
         logging.error("corrupt")
         return None
-    chunker = HybridChunker(tokenizer=embed_model_id, max_tokens=max_tokens)
+    # define chunker
+    if max_tokens is None:
+        chunker = HybridChunker(tokenizer=embed_model_id)
+    else:
+        chunker = HybridChunker(tokenizer=embed_model_id, max_tokens=max_tokens)
+    
+    # chunking
     chunk_iter = chunker.chunk(doc)
     chunks = list(chunk_iter)
+    # create chunks lsit with metadata info
     paragraphs = []
     for i,chunk in enumerate(chunks):
         ser_txt = chunker.serialize(chunk=chunk)
@@ -235,6 +377,7 @@ def hybrid_chunking(folder_location,embed_model_id, max_tokens= 512):
                             'metadata':{'filename':filename,
                                         'page':chunk.meta.doc_items[0].prov[0].page_no}})
     
+    # save the chunks   
     chunks_list = {'paragraphs':paragraphs}
     with open(folder_location+ "/chunks.json", 'w') as file:
         json.dump(chunks_list, file)
