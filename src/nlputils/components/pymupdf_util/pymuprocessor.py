@@ -2,7 +2,7 @@ import pymupdf
 import pymupdf4llm
 import os
 import logging
-from ....nlputils.utils import get_files, open_file
+from nlputils.utils import get_files, open_file
 from langchain.text_splitter import MarkdownTextSplitter
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
