@@ -83,13 +83,19 @@ def get_tables(doclingDoc:DoclingDocument, folder_location:str, filename:str):
         table_df: pd.DataFrame = table.export_to_dataframe()
 
         # Save the table as csv
-        element_csv_filename = save_to_folder / f"{table_ix+1}.csv"
-        table_df.to_csv(element_csv_filename)
-
+        try:
+            element_csv_filename = save_to_folder / f"{table_ix+1}.csv"
+            table_df.to_csv(element_csv_filename)
+        except Exception as e:
+            logging.error(e)
         # Save the table as html
-        element_html_filename = save_to_folder / f"{table_ix+1}.html"
-        with element_html_filename.open("w") as fp:
-            fp.write(table.export_to_html())
+        try:
+            element_html_filename = save_to_folder / f"{table_ix+1}.html"
+            with element_html_filename.open("w", encoding="utf-8") as fp:
+                fp.write(table.export_to_html())
+        except Exception as e:
+            logging.error(e)
+
     return save_to_folder
 
 def save_output(doclingDoc, folder_location, filename):
