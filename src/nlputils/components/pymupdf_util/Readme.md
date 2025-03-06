@@ -2,6 +2,11 @@
 
 Packages: pymupdf=1.24.11, pymupdf4llm=0.0.17
 
+For tessearct installation on azure:
+- Install the utils first
+- in same environment run  ```sudo apt install tesseract-ocr```
+- locate the tessdata (default: "/usr/share/tesseract-ocr/4.00/tessdata), else run ```sudo find / -name "tessdata"``` pass this location to tessdata when using OCR
+
 ## Remarks on Document processing using Pymupdf:
 - Easy to deploy as it built as package which can be easily installed.
 - Detailed Features of Pymupdf: https://pymupdf.readthedocs.io/en/latest/about.html

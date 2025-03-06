@@ -25,13 +25,27 @@ def create_markdown(filepath, folder_location, filename):
         with pymupdf.open(filepath) as doc:
             # convert file to markdown text
             md_text = pymupdf4llm.to_markdown(doc, page_chunks=True)
-            # iterate through the pages and save each file as markdown
-            for id,page in enumerate(md_text):
+
+            try:
+
                 if not os.path.exists(folder_location + f"tmp/{filename}/markdown/"):
                     os.makedirs(folder_location + f"tmp/{filename}/markdown/")
                     new_path = folder_location + f"tmp/{filename}/markdown/"
-                with open(new_path + f'{id}.md', 'w') as file:
-                        file.write(page['text'])
+                else:
+                    new_path = folder_location + f"tmp/{filename}/markdown/"
+            except Exception as e:
+                logging.error(e)
+                return None
+                 
+
+            # iterate through the pages and save each file as markdown
+            try:
+                for id,page in enumerate(md_text):
+
+                    with open(new_path + f'{id}.md', 'w') as file:
+                            file.write(page['text'])
+            except Exception as e:
+                logging.error(e)
             
         return new_path
     except Exception as e:
@@ -59,16 +73,27 @@ def useOCR_create_text(filepath, tessdata, folder_location, filename, dpi=300):
     
     try:
         doc = pymupdf.open(filepath)
-        # iterate through pages
-        for id,page in enumerate(doc):
-            # ocr the page and save page output as markdown
-            full_tp = page.get_textpage_ocr(tessdata = tessdata, flags=0, dpi=dpi, full=True)
+        try:
             if not os.path.exists(folder_location + f"tmp/{filename}/txt/"):
                 os.makedirs(folder_location + f"tmp/{filename}/txt/")
                 new_path = folder_location + f"tmp/{filename}/txt/"
-            with open(new_path + f'{id}.txt', 'w') as file:
-                    file.write(page.get_text(textpage=full_tp))
+            else:
+                new_path = folder_location + f"tmp/{filename}/markdown/"
+        except Exception as e:
+            logging.error(e)
+            return None
+
+
+        # iterate through pages
+        try:
+            for id,page in enumerate(doc):
+                # ocr the page and save page output as markdown
+                full_tp = page.get_textpage_ocr(tessdata = tessdata, flags=0, dpi=dpi, full=True)
                 
+                with open(new_path + f'{id}.txt', 'w') as file:
+                        file.write(page.get_text(textpage=full_tp))
+        except Exception as e:
+            logging.error(e)       
         return new_path
     except Exception as e:
         logging.error(e)
