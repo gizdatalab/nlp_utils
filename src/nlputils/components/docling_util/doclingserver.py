@@ -383,7 +383,7 @@ def hybrid_chunking(folder_location,embed_model_id, max_tokens= None):
         ser_txt = chunker.serialize(chunk=chunk)
 
         paragraphs.append({'content':ser_txt,
-                            'metadata':{'filename':chunk.meta.filename,
+                            'metadata':{'filename':filename,
                                         'page':chunk.meta.doc_items[0].prov[0].page_no,
                                         'content_layer': chunk.meta.doc_items[0].content_layer,
                                         'label': chunk.meta.doc_items[0].label,
