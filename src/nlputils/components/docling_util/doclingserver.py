@@ -375,13 +375,20 @@ def hybrid_chunking(folder_location,embed_model_id, max_tokens= None):
     # chunking
     chunk_iter = chunker.chunk(doc)
     chunks = list(chunk_iter)
+    print("THIS IS CHUNKS", chunks)
+
     # create chunks lsit with metadata info
     paragraphs = []
     for i,chunk in enumerate(chunks):
         ser_txt = chunker.serialize(chunk=chunk)
+
         paragraphs.append({'content':ser_txt,
-                            'metadata':{'filename':filename,
-                                        'page':chunk.meta.doc_items[0].prov[0].page_no}})
+                            'metadata':{'filename':chunk.meta.filename,
+                                        'page':chunk.meta.doc_items[0].prov[0].page_no,
+                                        'content_layer': chunk.meta.doc_items[0].content_layer,
+                                        'label': chunk.meta.doc_items[0].label,
+                                        'heading': chunk.meta.headings,
+                                        'chunk_length': len(ser_txt.split())}})
     
     # save the chunks   
     chunks_list = {'paragraphs':paragraphs}
