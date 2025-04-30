@@ -333,7 +333,7 @@ def useOCR(file_path, num_threads=8):
 
     return result, filename
 
-def hybrid_chunking(folder_location,embed_model_id, max_tokens= None):
+def hybrid_chunking(folder_location,embed_model_id, max_tokens= None, exclude_metadata: dict = None):
     """
     this is adaptation of hybrid chunking (headings) imlemented for docling.Document
 
@@ -375,20 +375,47 @@ def hybrid_chunking(folder_location,embed_model_id, max_tokens= None):
     # chunking
     chunk_iter = chunker.chunk(doc)
     chunks = list(chunk_iter)
-    print("THIS IS CHUNKS", chunks)
 
     # create chunks lsit with metadata info
     paragraphs = []
     for i,chunk in enumerate(chunks):
+
         ser_txt = chunker.serialize(chunk=chunk)
 
+        # Retrieve the relevant metadata
+        
+        metadata = {
+            'filename':chunk.meta.origin.filename,
+            'page':chunk.meta.doc_items[0].prov[0].page_no,
+            'content_layer': chunk.meta.doc_items[0].content_layer,
+            'label': chunk.meta.doc_items[0].label,
+            'heading': chunk.meta.headings,
+            'chunk_length': len(ser_txt.split())
+            }
+
+        # Exclusion criteria 
+        if exclude_metadata: 
+
+            skip = False
+
+            # Check every exclusion criteria
+            for k, v in exclude_metadata.items(): 
+                if isinstance(v, list):
+                    if metadata.get(k) in v: 
+                        skip = True
+                        break
+                else: 
+                    if metadata.get(k) == v: 
+                        skip = True
+                        break
+            
+            # If criteria is met, move to next paragraph
+            if skip: 
+                continue 
+          
+        # if no exclusion criteria is met, append paragraph
         paragraphs.append({'content':ser_txt,
-                            'metadata':{'filename':filename,
-                                        'page':chunk.meta.doc_items[0].prov[0].page_no,
-                                        'content_layer': chunk.meta.doc_items[0].content_layer,
-                                        'label': chunk.meta.doc_items[0].label,
-                                        'heading': chunk.meta.headings,
-                                        'chunk_length': len(ser_txt.split())}})
+                            'metadata': metadata})
     
     # save the chunks   
     chunks_list = {'paragraphs':paragraphs}
