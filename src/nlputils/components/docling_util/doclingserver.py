@@ -353,6 +353,16 @@ def hybrid_chunking(folder_location,embed_model_id, max_tokens= None, exclude_me
     
     """
 
+    # Validate exclude_metadata format
+    if exclude_metadata is not None:
+        if not isinstance(exclude_metadata, dict):
+            raise TypeError("exclude_metadata must be a dictionary with metadata keys and values to exclude.")
+        for k, v in exclude_metadata.items():
+            if not isinstance(k, str):
+                raise ValueError("Keys in exclude_metadata must be strings and should be one of the following: filename, page, content_layer, label, heading or chunk_length")
+            if not isinstance(v, (str, list)):
+                raise ValueError("Values in exclude_metadata must be a string or a list of strings.")
+
     # extracting filename
     filename = os.path.basename(folder_location)
 
