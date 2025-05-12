@@ -4,10 +4,12 @@ from azure.ai.ml import MLClient
 from azure.identity import DefaultAzureCredential
 from azureml.fsspec import AzureMachineLearningFileSystem
 from azure.storage.blob import BlobServiceClient, BlobClient, ContainerClient
-from typing import Optional, Dict, List, Any
+from typing import Optional, Dict, List, Any, Union
 from azure.ai.ml.entities import Data
 from azure.ai.ml.constants import AssetTypes
-
+from nlputils import utils
+from nlputils.components.docling_util import doclingserver
+import pandas as pd
 
 def read_files_dataassets(
     data_asset_name: str,
@@ -334,3 +336,449 @@ def upload_folder_to_datastore(
     else:
         return True
 
+
+def create_batches(files: List[str],
+                   file_extensions: Union[List[str], str] = ['pdf', 'docx'],
+                   batch_size: int = 20 , processing_folder:str = None) -> Dict[str, pd.DataFrame]:
+    """
+    Organizes files into a dictionary of pandas DataFrames, categorized by file type,
+    and assigns batch numbers to each file within each DataFrame.
+
+    Args:
+        files (List[str]): A list of file paths.
+        file_extensions (Union[List[str], str], optional): A list of file extensions to process
+            (e.g., ['pdf', 'docx']) or "*" to process all files.
+            Defaults to ['pdf', 'docx'].
+        batch_size (int, optional): The number of files per batch. Defaults to 20.
+        processing_folder (str): Save the batch files in a folder, Defualt to None (will use current working dir)
+
+    Returns:
+        Dict[str, pd.DataFrame]: A dictionary where keys are file types (e.g., 'pdf', 'docx', 'imagepdf')
+            and values are pandas DataFrames.  Each DataFrame contains file information
+            ('filepath', 'filename', 'page_count', 'ImagePDF', 'batch') for files of that type.
+            Returns an empty dictionary if no files match the criteria.
+
+    Raises:
+        TypeError: If 'files' is not a list.
+        ValueError: If 'file_extensions' is not a list, string, or empty list.
+    """
+    # Input validation
+    if not isinstance(files, list):
+        raise TypeError(f"Expected 'files' to be a list, got {type(files)}")
+    if not isinstance(file_extensions, (list, str)):
+        raise TypeError(f"Expected 'file_extensions' to be a list or str, got {type(file_extensions)}")
+    if isinstance(file_extensions, list) and not file_extensions:
+        raise ValueError("'file_extensions' cannot be an empty list")
+
+    file_list: Dict[str, List[str]] = {}  # Use type hinting for clarity
+
+    if file_extensions == "*":
+        logging.info(f"Processing all file types. Total file count: {len(files)}")
+        file_list = {'allfiles': files}  # Store all files under the key 'allfiles'
+    else:
+        if isinstance(file_extensions, str):
+            file_extensions = [file_extensions] # Convert to list for consistent handling
+
+        for extension in file_extensions:
+            file_list[extension] = []  # Initialize an empty list for each extension
+            for file in files:
+                _, f_extension = os.path.splitext(file)
+                if f_extension[1:].lower() == extension.lower():  # Case-insensitive comparison
+                    file_list[extension].append(file)
+
+    # Prepare data for DataFrame creation
+    keys = [k for k, v in file_list.items() for _ in v]  # Efficient flattening
+    values = [v for sublist in file_list.values() for v in sublist]  # More readable flattening
+
+    df_files = pd.DataFrame({'filetype': keys, 'filepath': values})
+    if df_files.empty:
+        logging.warning("No files matched the specified file extensions.")
+        return {} # Return empty dict
+
+    logging.info(f"Created DataFrame with {len(df_files)} files.")
+
+    # Get page count and ImagePDF status
+    df_files['page_count'] = df_files.filepath.apply(lambda x: utils.get_page_count(x))
+    df_files['ImagePDF'] = df_files.apply(
+        lambda x: utils.check_if_imagepdf(x['filepath']) if x['filetype'] == 'pdf' else False,
+        axis=1
+    )
+    df_files['filename'] = df_files.filepath.apply(os.path.basename)
+
+    file_list_dfs: Dict[str, pd.DataFrame] = {} # Use a different name to avoid shadowing
+    for filetype in file_extensions:
+        if filetype == 'pdf':
+            # Separate image and normal pdf, sort, and reset index
+            condition_pdf_image = df_files[(df_files['filetype'] == 'pdf') & (df_files['ImagePDF'] == True)]\
+                .sort_values(by='filename', ignore_index=True)  # Use ignore_index for efficiency
+            file_list_dfs['imagepdf'] = condition_pdf_image
+
+            condition_pdf_text = df_files[(df_files['filetype'] == 'pdf') & (df_files['ImagePDF'] == False)]\
+                .sort_values(by='filename', ignore_index=True)
+            file_list_dfs['pdf'] = condition_pdf_text
+        else:
+            file_list_dfs[filetype] = df_files[(df_files['filetype'] == filetype)]\
+                .sort_values(by='filename', ignore_index=True)
+
+    # Assign batches
+    for key, df in file_list_dfs.items():
+        batches = [(index // batch_size) + 1 for index in df.index] # use list comprehension
+        df['batch'] = batches
+        logging.info(f"Assigned batches to {key} files.  Total {key} file count: {len(df)}.")
+
+        # Save to JSON if save_path is provided
+        if processing_folder:
+            # Ensure the directory exists
+            try:
+                os.makedirs(processing_folder, exist_ok=True)  # Create directory if it doesn't exist
+            except OSError as e:
+                raise OSError(f"Error creating directory {processing_folder}: {e}") from e
+
+            json_filename = os.path.join(processing_folder, f"{key}_files.json")
+            df.to_json(json_filename, orient="records", indent=4)  # Save as JSON
+            logging.info(f"Saved DataFrame for {key} to {json_filename}")
+        elif processing_folder is None: # added condition
+            json_filename = f"{key}_files.json"
+            df.to_json(json_filename, orient="records", indent=4)  # Save as JSON
+            logging.info(f"Saved DataFrame for {key} to {json_filename}")
+        
+    return file_list_dfs
+
+
+def read_json_files_to_dfs(folder_path: str,
+                           encoding: str = 'utf-8',
+                           errors: str = 'strict') -> List[pd.DataFrame]:
+    """
+    Reads all JSON files in the specified folder and returns a list of pandas DataFrames.
+
+    Args:
+        folder_path (str): The path to the folder containing the JSON files.
+        encoding (str, optional): The encoding to use when reading the JSON files.
+            Defaults to 'utf-8'.
+        errors (str, optional): How to handle encoding errors.  Options are:
+            'strict' - raise an exception,
+            'ignore' - ignore errors,
+            'replace' - replace with a replacement character.
+            Defaults to 'strict'.
+
+    Returns:
+        List[pd.DataFrame]: A list of pandas DataFrames, one for each JSON file
+        successfully read. Returns an empty list if no JSON files are found
+        or if an error occurs during folder processing.
+
+    Raises:
+        TypeError: If `folder_path` is not a string.
+        NotADirectoryError: If `folder_path` is not a directory.
+        OSError: If there is an issue reading a JSON file.
+        UnicodeDecodeError: If there is an issue decoding a file with the specified encoding.
+    """
+    if not isinstance(folder_path, str):
+        raise TypeError(f"folder_path must be a string, not {type(folder_path)}")
+    if not os.path.isdir(folder_path):
+        raise NotADirectoryError(f"folder_path '{folder_path}' is not a valid directory")
+    if not isinstance(encoding, str):
+        raise TypeError(f"encoding must be a string, not {type(encoding)}")
+    if not isinstance(errors, str):
+        raise TypeError(f"errors must be a string, not {type(errors)}")
+    if errors not in ['strict', 'ignore', 'replace']:
+        raise ValueError(f"errors must be one of 'strict', 'ignore', or 'replace', not '{errors}'")
+
+    dfs = {} # Use type hinting
+    for filename in os.listdir(folder_path):
+        if filename.lower().endswith(".json"):
+            file_path = os.path.join(folder_path, filename)
+            try:
+                # Read JSON file into a DataFrame
+                df = pd.read_json(file_path, encoding=encoding, encoding_errors=errors)
+                dfs[filename.split("_")[0]] = df
+            except OSError as e:
+                # Catch general OS errors during file reading (e.g., file not found, permission error)
+                print(f"Error reading JSON file '{file_path}': {e}")
+                # Consider logging the error with the logging module, instead of printing.
+                #  logging.error(f"Error reading JSON file '{file_path}': {e}")
+                continue  # Skip to the next file
+            except UnicodeDecodeError as e:
+                # Handle encoding errors specifically
+                print(f"UnicodeDecodeError reading '{file_path}': {e}")
+                continue
+            except Exception as e:
+                # Catch any other exceptions during JSON parsing
+                print(f"Error parsing JSON file '{file_path}': {e}")
+                continue
+         
+
+    return dfs
+
+def azure_process_batch(
+    df: pd.DataFrame,
+    batch_val: int,
+    filetype: str,
+    storage_account_key: str,
+    datastore_name: str,
+    local_folder_path: str,
+    destination_path: str,
+    data_asset_name: str,
+    data_asset_version: str,
+    processing_folder:str,
+    create_data_asset: bool = True,
+    
+) -> bool:
+    """
+    Processes a batch of files, uploads them to Azure Blob Storage, and updates
+    the DataFrame with processing and upload status.
+
+    Args:
+        df (pd.DataFrame): DataFrame containing file information, including 'filepath',
+            'filename', and 'batch' columns.  The DataFrame is modified in place.
+        batch_val (int): The batch number to process.
+        filetype (str): The type of files being processed (e.g., 'pdf', 'docx', 'imagepdf').
+        storage_account_key (str): The key for the Azure Storage account.
+        datastore_name (str): The name of the Azure datastore.
+        local_folder_path (str): The local path where files are stored.
+        destination_path (str): The destination path in Azure Blob Storage.
+        data_asset_name (str): The name of the data asset.
+        data_asset_version (str): The version of the data asset.
+        create_data_asset (bool, optional): Whether to create a data asset. Defaults to True.
+        processing_folder (str): Path to folder to save jsonfile with meta-info
+
+    Returns:
+        bool: True if the batch was processed and uploaded successfully, False otherwise.
+              Returns False if doclingserver processing fails.
+
+    Raises:
+        ValueError: If required arguments are missing or invalid.
+        Exception:  For errors during doclingserver processing or Azure upload.  The
+                    function attempts to catch and log specific exceptions, but may
+                    raise others.
+    """
+    # Input Validation (more comprehensive)
+    if not isinstance(df, pd.DataFrame):
+        raise ValueError("df must be a pandas DataFrame")
+    if not all(col in df for col in ['filepath', 'filename', 'batch']):
+        raise ValueError("df must contain 'filepath', 'filename', and 'batch' columns")
+    # if not isinstance(batch_val, str):
+    #     raise ValueError("batch_val must be an str")
+    if not isinstance(filetype, str):
+        raise ValueError("filetype must be a string")
+    if not isinstance(storage_account_key, str):
+        raise ValueError("storage_account_key must be a string")
+    if not isinstance(datastore_name, str):
+        raise ValueError("datastore_name must be a string")
+    if not isinstance(local_folder_path, str):
+        raise ValueError("local_folder_path must be a string")
+    if not isinstance(destination_path, str):
+        raise ValueError("destination_path must be a string")
+    if not isinstance(data_asset_name, str):
+        raise ValueError("data_asset_name must be a string")
+    if not isinstance(data_asset_version, str):
+        raise ValueError("data_asset_version must be a string")
+    if not isinstance(create_data_asset, bool):
+        raise ValueError("create_data_asset must be a boolean")
+    if not isinstance (processing_folder, str):
+        raise ValueError("processing_folder must be a string")
+
+    logging.info(f"Processing batch {batch_val} for filetype {filetype}")
+
+    batch_df = df[df.batch == batch_val].copy()  # Create a copy to avoid modifying the original slice
+    batch_df['filename_without_extension'] = batch_df.filename.apply(lambda x: os.path.splitext(x)[0])
+    batch_df['processed'] = False
+    batch_df['uploaded'] = False
+
+    if filetype != 'imagepdf':
+        try:
+            
+            success_count, partial_success_count, failure_count, folder_info = doclingserver.batch_processing(
+                file_list=batch_df.filepath.tolist(),
+                output_dir=f"{local_folder_path}{filetype}/{batch_val}/")
+            logging.info(
+                f"doclingserver processing: success={success_count}, partial={partial_success_count}, failure={failure_count}"
+            )
+        except Exception as e:
+            logging.error(f"Error in doclingserver.batch_processing: {e}")
+            return False  # Return False on doclingserver failure
+
+        try:
+            check_upload = upload_folder_to_datastore(
+                datastore_name=datastore_name,
+                storage_account_key=storage_account_key,
+                local_folder_path=f"{local_folder_path}{filetype}/{batch_val}/", 
+                destination_path=f"{destination_path}{filetype}/", 
+                create_data_asset=create_data_asset,
+                data_asset_name=data_asset_name,
+                data_asset_version=data_asset_version,
+            )
+        except Exception as e:
+            logging.error(f"Error in upload_folder_to_datastore: {e}")
+            return False  # Return False on upload failure
+
+        if check_upload:
+            for f in folder_info:
+                filename_without_extension = os.path.basename(f)
+                matching_rows = batch_df[batch_df['filename_without_extension'] == filename_without_extension]
+                if not matching_rows.empty:
+                    index_val = matching_rows.index[0]
+                    # Use .loc to modify the original DataFrame
+                    df.loc[index_val, 'processed'] = True
+                    df.loc[index_val, 'uploaded'] = True
+
+                    json_filename = os.path.join(processing_folder, f"files_info/{filetype}_files.json")
+                    try:
+                        df.to_json(json_filename, orient="records", indent=4)
+                        logging.info(f"Saved file info to {json_filename}")
+                    except Exception as e:
+                        logging.error(f"Error saving JSON: {e}") # keep going even if JSON save fails
+            logging.info(f"Finished batch {batch_val}")
+            print(f"Finished batch {batch_val}")
+            return True
+        else:
+            return False # upload failed
+    else: #filetype == 'imagepdf'
+        for file in batch_df.filepath.tolist():
+            try:
+                doclingoutput,filename = doclingserver.useOCR(file)
+                folder_loc,tables_folder = doclingserver.save_output(doclingoutput, f"{local_folder_path}{filetype}/{batch_val}/", filename)
+            except Exception as e:
+                logging.error(f"Error in doclingserver.useOCR or save_output: {e}")
+                return False
+            try:
+                check_upload = upload_folder_to_datastore(
+                    datastore_name=datastore_name,
+                    storage_account_key=storage_account_key,
+                    local_folder_path=f"{local_folder_path}{filetype}/{batch_val}/", 
+                    destination_path=f"{destination_path}{filetype}/", 
+                    create_data_asset=create_data_asset,
+                    data_asset_name=data_asset_name,
+                    data_asset_version=data_asset_version,
+                )
+            except Exception as e:
+                logging.error(f"Error in upload_folder_to_datastore: {e}")
+                return False  # Return False on upload failure
+            if check_upload:
+                filename_without_extension = os.path.basename(filename)
+                matching_rows = batch_df[batch_df['filename_without_extension'] == filename_without_extension]
+                if not matching_rows.empty:
+                    index_val = matching_rows.index[0]
+                    # Use .loc to modify the original DataFrame
+                    df.loc[index_val, 'processed'] = True
+                    df.loc[index_val, 'uploaded'] = True
+
+                    json_filename = os.path.join(processing_folder, f"files_info/{filetype}_files.json")
+                    try:
+                        df.to_json(json_filename, orient="records", indent=4)
+                        logging.info(f"Saved file info to {json_filename}")
+                    except Exception as e:
+                        logging.error(f"Error saving JSON: {e}") # keep going even if JSON save fails
+        logging.info(f"Finished batch {batch_val}")
+        print(f"Finished batch {batch_val}")     
+        return True
+    
+
+def batch_handler(
+    processing_folder: str,
+    storage_account_key: str,
+    datastore_name: str,
+    local_folder_path: str,
+    destination_path: str,
+    data_asset_name: str,
+    data_asset_version: str,
+    create_data_asset: bool = True,
+) -> None:
+    """
+    Handles the processing of batches of files for different file types.  It reads file
+    information from JSON files, iterates through batches, calls the azure_process_batch
+    function, and logs the processed batches.
+
+    Args:
+        processing_folder (str): The path to the folder containing the 'files_info'
+            subdirectory with JSON files and where batch logs will be saved.
+        storage_account_key (str): The key for the Azure Storage account.
+        datastore_name (str): The name of the Azure datastore.
+        local_folder_path (str): The local path where files are stored.
+        destination_path (str): The destination path in Azure Blob Storage.
+        data_asset_name (str): The name of the data asset.
+        data_asset_version (str): The version of the data asset.
+        create_data_asset (bool, optional): Whether to create a data asset. Defaults to True.
+
+    Raises:
+        ValueError: If required arguments are missing or invalid.
+        FileNotFoundError: If the 'files_info' directory does not exist.
+        OSError: If there is an error creating the batch log directory.
+        Exception: Any exceptions raised by called functions (e.g., read_json_files_to_dfs, azure_process_batch).
+    """
+    # Input Validation
+    if not isinstance(processing_folder, str):
+        raise ValueError("processing_folder must be a string")
+    if not isinstance(storage_account_key, str):
+        raise ValueError("storage_account_key must be a string")
+    if not isinstance(datastore_name, str):
+        raise ValueError("datastore_name must be a string")
+    if not isinstance(local_folder_path, str):
+        raise ValueError("local_folder_path must be a string")
+    if not isinstance(destination_path, str):
+        raise ValueError("destination_path must be a string")
+    if not isinstance(data_asset_name, str):
+        raise ValueError("data_asset_name must be a string")
+    if not isinstance(data_asset_version, str):
+        raise ValueError("data_asset_version must be a string")
+    if not isinstance(create_data_asset, bool):
+        raise ValueError("create_data_asset must be a boolean")
+
+    files_info_path = processing_folder+"files_info/"
+    if not os.path.exists(files_info_path):
+        raise FileNotFoundError(f"Directory 'files_info' not found at {files_info_path}")
+
+    files_df = read_json_files_to_dfs(files_info_path)  # Changed variable name
+
+    # batch_logs_path = os.path.join(processing_folder, "files_info", "batch_logger", "batch_logs.json")
+    if os.path.exists(processing_folder+"files_info/batch_logger/batch_logs.json"):
+        batch_logs = pd.read_json(processing_folder+"files_info/batch_logger/batch_logs.json")
+    else:
+        batch_logs = pd.DataFrame(columns=['filetype', 'batch'])
+
+    for filetype in files_df.keys():  
+        logging.info(f"Processing {filetype} files")
+        print(f"Processing {filetype} files")
+        batches = files_df[filetype].batch.unique()
+
+        for batch_val in batches:
+            if batch_val in list(batch_logs[batch_logs.filetype == filetype].batch): # use .values
+                logging.info(f"Batch {batch_val} for {filetype} already processed, skipping.")
+                print(f"Batch {batch_val}  for {filetype} already processed , skipping")
+                check = False
+                continue  # Use continue for clarity
+
+            else:
+                logging.info(f"Starting batch {batch_val} for {filetype}")
+                print(f"Starting batch {batch_val}")
+                df = files_df[filetype]
+
+                check = azure_process_batch(
+                    df=df,
+                    batch_val=batch_val,
+                    filetype=filetype,
+                    datastore_name=datastore_name,
+                    storage_account_key=storage_account_key,
+                    local_folder_path=local_folder_path,
+                    destination_path=destination_path,
+                    create_data_asset=create_data_asset,
+                    data_asset_name=data_asset_name,
+                    processing_folder=processing_folder,  # Pass processing_folder
+                    data_asset_version=data_asset_version,
+                )
+
+                if check:
+                    batch_logs.loc[len(batch_logs)] = [filetype, batch_val]
+                    try:
+                        os.makedirs(os.path.join(processing_folder, "files_info/batch_logger/"), exist_ok=True)
+                        json_filename = os.path.join(processing_folder, f"files_info/batch_logger/batch_logs.json")
+                        batch_logs.to_json(json_filename, orient="records", indent=4)
+                        logging.info(f"Saved batch log to {json_filename}")
+                    except OSError as e:
+                        raise OSError(f"Error saving batch logs to {json_filename}: {e}") from e
+                else:
+                    logging.error(f"Processing batch {batch_val} for {filetype} failed.")
+                    print(f"Processing batch {batch_val} for {filetype} failed.")
+                    # Decide if you want to continue processing other batches/filetypes
+                    # or raise an exception here.  For now, I'll continue.
+    logging.info("Batch processing completed.")
+    print("Batch processing completed.")
