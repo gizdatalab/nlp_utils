@@ -179,6 +179,7 @@ def download_files_dataassets(
     return result
 
 
+
 def upload_folder_to_datastore(
     datastore_name: str,
     storage_account_key: str,
@@ -193,13 +194,15 @@ def upload_folder_to_datastore(
     and optionally creates a data asset.
 
     Args:
+        subscription_id (str): Your Azure subscription ID.
+        resource_group (str): The resource group name.
+        workspace_name (str): Your Azure ML workspace name.
         datastore_name (str): The name of the datastore to upload to.
-        storage_account_key (str): storage account acccess key of storage account to which datastore point
         local_folder_path (str): The path to the local folder in the workspace's file system.
-        destination_path (str): The path within the datastore where the folder will be uploaded. ex: "processed/
+        destination_path (str): The path within the datastore where the folder will be uploaded.
         create_data_asset (bool, optional): Whether to create a data asset after uploading. Defaults to False.
         data_asset_name (Optional[str], optional): The name of the data asset to create. Required if create_data_asset is True. Defaults to None.
-        data_asset_version (Optional[str], optional): The version of the data asset.  Defaults to None.
+        data_asset_version (Optional[str], optional): The version of the data asset.  Defaults to "1".
     """
     logging.info(
         f"Uploading folder: {local_folder_path} to datastore: {datastore_name}, "
@@ -445,6 +448,7 @@ def create_batches(files: List[str],
     return file_list_dfs
 
 
+
 def read_json_files_to_dfs(folder_path: str,
                            encoding: str = 'utf-8',
                            errors: str = 'strict') -> List[pd.DataFrame]:
@@ -508,6 +512,7 @@ def read_json_files_to_dfs(folder_path: str,
          
 
     return dfs
+
 
 def azure_process_batch(
     df: pd.DataFrame,
