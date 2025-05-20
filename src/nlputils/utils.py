@@ -38,6 +38,29 @@ def get_page_count(file_path:str)->int | None:
         return None
 
 
+def find_files_by_extension(search_path, extension, recursive=False):
+    """
+    Finds files with a specific extension in a given directory.
+
+    Args:
+        search_path (str): The path to search in.
+        extension (str): The file extension to search for (e.g., "txt", "py").
+        recursive (bool, optional): If True, search recursively in subfolders.
+            Defaults to False.
+
+    Returns:
+        list: A list of absolute paths to the found files.
+    """
+    found_files = []
+    for root, _, files in os.walk(search_path):
+        for file in files:
+            if file.lower().endswith(extension.lower()):
+                found_files.append(os.path.join(root, file))
+        if not recursive:
+            break  # Stop after the top-level directory
+    return found_files
+
+    
 def get_files(root_folder:str,file_extensions=['pdf','docx'], recursive=True)->dict | None:
     """returns the files with extension provided in the root folder, 
         use recursive flag to do search recursively or not

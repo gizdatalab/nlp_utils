@@ -434,3 +434,138 @@ def hybrid_chunking(folder_location,embed_model_id, max_tokens= None, exclude_me
 
     return folder_location+ "/chunks.json"
     
+
+def hybrid_chunking_memory(filename, doc_dict, embed_model_id, max_tokens= None, exclude_metadata: dict = None):
+    """
+    this is adaptation of hybrid chunking (headings) imlemented for docling.Document
+
+    Params
+    --------------------
+    - folder_location: folder location where output for a file is saved
+                        Ex: "../folder1/filename1" notice no "/" in the end
+    - embed_model_id: model id from hugging face to be used for emebdding (the tokenizer of same
+                        model will be used to do the chunking)
+    - max_tokens: while the max_token info can be fetched from model id but you can set the 
+                    token limit for chunking too
+    
+                    
+    Returns
+    -------------
+    - location to the chunks file
+    
+    """
+
+    # Validate exclude_metadata format
+    if exclude_metadata is not None:
+        if not isinstance(exclude_metadata, dict):
+            raise TypeError("exclude_metadata must be a dictionary with metadata keys and values to exclude.")
+        for k, v in exclude_metadata.items():
+            if not isinstance(k, str):
+                raise ValueError("Keys in exclude_metadata must be strings and should be one of the following: filename, page, content_layer, label, heading or chunk_length")
+            if not isinstance(v, (str, list)):
+                raise ValueError("Values in exclude_metadata must be a string or a list of strings.")
+
+    # extracting filename
+    # filename = os.path.basename(folder_location)
+
+    # # definign path for docling.Document within folder
+    # doc_path = folder_location + "/" + filename + ".json"
+    # # read file
+    try:
+    #     with Path(doc_path).open("r", encoding="utf-8") as fp:
+    #         doc_dict = json.load(fp)
+        doc = DoclingDocument.model_validate(doc_dict)
+    except Exception as e:
+        logging.error("corrupt")
+        print("corrupt")
+        return None
+    # define chunker
+    if max_tokens is None:
+        chunker = HybridChunker(tokenizer=embed_model_id)
+    else:
+        chunker = HybridChunker(tokenizer=embed_model_id, max_tokens=max_tokens)
+    
+    # chunking
+    chunk_iter = chunker.chunk(doc)
+    chunks = list(chunk_iter)
+
+    # create chunks lsit with metadata info
+    paragraphs = []
+    for i,chunk in enumerate(chunks):
+
+        ser_txt = chunker.serialize(chunk=chunk)
+
+        # Retrieve the relevant metadata
+        try:
+            tmp_filename = chunk.meta.origin.filename
+        except Exception as e:
+            logging.error(e)
+            tmp_filename = None
+        
+        try:
+            tmp_page_no = chunk.meta.doc_items[0].prov[0].page_no
+        except Exception as e:
+            logging.error(e)
+            tmp_page_no = None
+        
+        try:
+            tmp_content_layer = chunk.meta.doc_items[0].content_layer.value
+        except Exception as e:
+            logging.error(e)
+            tmp_content_layer = None
+
+        try:
+            tmp_label = chunk.meta.doc_items[0].label.value
+        except Exception as e:
+            logging.error(e)
+            tmp_label = None
+
+        try:
+            tmp_heading = chunk.meta.headings
+        except Exception as e:
+            logging.error(e)
+            tmp_heading = None
+        
+        try:
+            tmp_chunk_length = len(ser_txt.split())
+        except Exception as e:
+            logging.error(e)
+            tmp_chunk_length = None
+
+        metadata = {'filename':tmp_filename,
+            'page':tmp_page_no,
+            'content_layer': tmp_content_layer,
+            'label': tmp_label,
+            'heading': tmp_heading,
+            'chunk_length': tmp_chunk_length}
+
+        # Exclusion criteria 
+        if exclude_metadata: 
+
+            skip = False
+
+            # Check every exclusion criteria
+            for k, v in exclude_metadata.items(): 
+                if isinstance(v, list):
+                    if metadata.get(k) in v: 
+                        skip = True
+                        break
+                else: 
+                    if metadata.get(k) == v: 
+                        skip = True
+                        break
+            
+            # If criteria is met, move to next paragraph
+            if skip: 
+                continue 
+          
+        # if no exclusion criteria is met, append paragraph
+        paragraphs.append({'content':ser_txt,
+                            'metadata': metadata})
+    
+    # save the chunks   
+    chunks_list = {'paragraphs':paragraphs}
+    # # # with open(folder_location+ "/chunks.json", 'w') as file:
+    # # #     json.dump(chunks_list, file)
+
+    return chunks_list

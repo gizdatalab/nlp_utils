@@ -10,6 +10,7 @@ from azure.ai.ml.constants import AssetTypes
 from nlputils import utils
 from nlputils.components.docling_util import doclingserver
 import pandas as pd
+import json
 
 def read_files_dataassets(
     data_asset_name: str,
@@ -185,6 +186,7 @@ def upload_folder_to_datastore(
     storage_account_key: str,
     local_folder_path: str,
     destination_path: str,  # Path within the datastore
+    relative_path_for_asset:str,
     create_data_asset: bool = False, #flag to create data asset
     data_asset_name: Optional[str] = None,
     data_asset_version: Optional[str] = None
@@ -200,6 +202,7 @@ def upload_folder_to_datastore(
         datastore_name (str): The name of the datastore to upload to.
         local_folder_path (str): The path to the local folder in the workspace's file system.
         destination_path (str): The path within the datastore where the folder will be uploaded.
+        relative_path_for_asset (str): Relative path in data asset which shud point to folder 
         create_data_asset (bool, optional): Whether to create a data asset after uploading. Defaults to False.
         data_asset_name (Optional[str], optional): The name of the data asset to create. Required if create_data_asset is True. Defaults to None.
         data_asset_version (Optional[str], optional): The version of the data asset.  Defaults to "1".
@@ -326,7 +329,7 @@ def upload_folder_to_datastore(
             return True
         except Exception:
             my_data = Data(
-                path=f"azureml://datastores/{datastore.name}/paths/{destination_path}",  # Use datastore-relative path
+                path=f"azureml://datastores/{datastore.name}/paths/{relative_path_for_asset}",  # Use datastore-relative path
                 type=AssetTypes.URI_FOLDER,  # Or AssetType.URI_FILE, depending on what you uploaded
                 name=data_asset_name,
                 description=f"Data asset created from folder {local_folder_path} in datastore {datastore_name}",
@@ -608,6 +611,7 @@ def azure_process_batch(
                 storage_account_key=storage_account_key,
                 local_folder_path=f"{local_folder_path}{filetype}/{batch_val}/", 
                 destination_path=f"{destination_path}{filetype}/", 
+                relative_path_for_asset = destination_path,
                 create_data_asset=create_data_asset,
                 data_asset_name=data_asset_name,
                 data_asset_version=data_asset_version,
@@ -651,6 +655,7 @@ def azure_process_batch(
                     storage_account_key=storage_account_key,
                     local_folder_path=f"{local_folder_path}{filetype}/{batch_val}/", 
                     destination_path=f"{destination_path}{filetype}/", 
+                    relative_path_for_asset = destination_path,
                     create_data_asset=create_data_asset,
                     data_asset_name=data_asset_name,
                     data_asset_version=data_asset_version,
@@ -787,3 +792,81 @@ def batch_handler(
                     # or raise an exception here.  For now, I'll continue.
     logging.info("Batch processing completed.")
     print("Batch processing completed.")
+
+
+
+def df_with_docling_json(
+        processed_data_asset_name: str,
+        processed_data_asset_version: str,
+        data_asset_name:str,
+        processing_folder: str,
+        destination_path: str,  # Added destination_path as a parameter
+        file_types: List[str] = ['docx', 'pdf', 'imagepdf'],
+        upload_df: bool = True,
+        local_download_folder: Optional[str] = None, # Added local_download_folder
+    ) -> pd.DataFrame | str:
+    """
+    Processes files from an Azure ML data asset, reads corresponding JSON files,
+    creates a Pandas DataFrame, and optionally uploads it back to the data asset.
+
+    Args:
+        processed_data_asset_name: Name of the processed data asset.
+        processed_data_asset_version: Version of the processed data asset.
+        processing_folder: Path within the data asset where files are located (e.g., 'my_folder/').
+        destination_path: Path within the data asset where the output dataframe should be saved
+        file_types: List of file types to process (e.g., ['docx', 'pdf']).
+        upload_df: Whether to upload the DataFrame to the data asset.
+        local_download_folder: Local folder where files are downloaded.
+
+    Returns:
+        If upload_df is True: the path to the uploaded JSON file in the data asset.
+        If upload_df is False: the Pandas DataFrame.
+    """
+    credential = DefaultAzureCredential()
+    ml_client = MLClient.from_config(credential=credential)
+    data_asset = ml_client.data.get(name=processed_data_asset_name, version=processed_data_asset_version)
+    fs = AzureMachineLearningFileSystem(data_asset.path, credential=credential)
+
+    def read_json_file(path_to_file: str) -> dict:
+        """Reads a JSON file from the data asset."""
+        try:
+            with fs.open(path_to_file, 'r') as f:
+                return json.load(f)
+        except Exception as e:
+            print(f"Error reading JSON file: {path_to_file} - {e}")
+            return {}  # Return an empty dict on error to avoid crashing
+
+    
+    files_df = read_json_files_to_dfs(processing_folder +"files_info/")
+    df_list = []
+    for key, val in files_df.items():
+        if key in file_types:
+            val['data_asset'] = [{'data_asset_name':processed_data_asset_name,
+                                'data_asset_version':processed_data_asset_version}]*len(val)
+            val['rel_path_data_asset'] = val['filepath'].apply(lambda x: f"{key}/" + os.path.splitext(x[len(f"/tmp/{data_asset_name}/"):])[0] +"/"
+                                                                            if local_download_folder == None else
+                                                                            f"{key}/" + os.path.splitext(x[len(local_folder_path):])[0] +"/" )
+            val['destination_path'] = destination_path
+            df_list.append(val)
+
+            
+
+    if not df_list:
+        print("No files to process.")
+        return pd.DataFrame()
+
+    df = pd.concat(df_list,ignore_index=True)
+
+    df['json_file'] = df.apply(lambda x: read_json_file(data_asset.path + x['rel_path_data_asset'] + os.path.splitext(x['filename'])[0]+".json")
+                                    if x['uploaded'] == True else None, axis=1)
+
+    if upload_df:  
+        try:
+            df.to_json("/tmp/docling_json_dataframe.json", orient="records", indent=4)
+            fs.upload(lpath='/tmp/docling_json_dataframe.json', rpath=data_asset.path +'docling/', recursive=False, **{'overwrite': 'MERGE_WITH_OVERWRITE'})
+        except Exception as e:
+            print(f"Error uploading dataframe: {e}")
+            return df
+        return data_asset.path +'docling/' + 'docling_json_dataframe.json'
+    else:
+        return df
