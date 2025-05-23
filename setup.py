@@ -9,6 +9,11 @@ install_requires = [
         "gliner == 0.2.13",
         "langchain == 0.2.6",
         "langchain-text-splitters == 0.2.4",
+        "marshmallow == 3.26.1",
+        "azure-ai-ml == 1.25.0",
+        "azure-identity == 1.20.0",
+        "azureml-fsspec == 1.3.1",
+
 ]
 
 
