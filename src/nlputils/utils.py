@@ -7,7 +7,9 @@ import pandas as pd
 import json
 import os
 from tqdm import tqdm
+import subprocess
 import re
+import sys
 
 def check_if_imagepdf(file_path:str)->bool | None:  
     """
@@ -102,6 +104,7 @@ def convertfile(docx_path, pdf_path):
         print(e)
         return None
 
+    
 
 def convert_docxfiles(docx_list:list, pdf_path:str = ""):
     """
@@ -180,3 +183,95 @@ def is_gibberish(text):
     if non_alpha_ratio > 0.5 or avg_word_length > 30 or whitespace_ratio > 0.3:
         return True
     return False
+
+
+def kill_soffice_bin_subprocess_method(force: bool = False) -> int:
+    """
+    Kills the soffice.bin process using OS-specific shell commands.
+    This method is OS-dependent.
+
+    Args:
+        force (bool): If True, uses the force kill command.
+
+    Returns:
+        int: 0 if no processes were found or terminated, 1 if successful, -1 on error.
+    """
+    killed_count = 0
+    if sys.platform.startswith('linux') or sys.platform == 'darwin': # Linux or macOS
+        try:
+            # Find PID(s)
+            pids_output = subprocess.run(['pgrep', 'soffice.bin'], capture_output=True, text=True, check=False)
+            pids = pids_output.stdout.strip().split('\n')
+            pids = [p for p in pids if p] # Filter out empty strings
+
+            if not pids:
+                print("soffice.bin process not found.")
+                return 0
+
+            for pid in pids:
+                command = ['kill', pid]
+                if force:
+                    command = ['kill', '-9', pid] # Force kill
+                print(f"Attempting to {'force ' if force else ''}kill soffice.bin with PID {pid}...")
+                result = subprocess.run(command, capture_output=True, text=True)
+
+                if result.returncode == 0:
+                    print(f"Successfully sent kill signal to PID {pid}.")
+                    killed_count += 1
+                else:
+                    print(f"Failed to kill PID {pid}. Error: {result.stderr.strip()}")
+            return killed_count
+        except FileNotFoundError:
+            print("Error: 'pgrep' or 'kill' command not found. Ensure they are in your PATH.")
+            return -1
+        except Exception as e:
+            print(f"An error occurred on Linux/macOS: {e}")
+            return -1
+
+    elif sys.platform == 'win32': # Windows
+        try:
+            command = ['taskkill', '/IM', 'soffice.bin']
+            if force:
+                command.append('/F') # Force kill
+
+            print(f"Attempting to {'force ' if force else ''}kill soffice.bin on Windows...")
+            result = subprocess.run(command, capture_output=True, text=True)
+
+            if result.returncode == 0:
+                print("Successfully sent kill signal to soffice.bin.")
+                # taskkill doesn't give precise count, but it usually works if returncode is 0
+                return 1
+            elif "No tasks are running" in result.stdout:
+                print("soffice.bin process not found.")
+                return 0
+            else:
+                print(f"Failed to kill soffice.bin. Error: {result.stderr.strip()}")
+                return -1
+        except FileNotFoundError:
+            print("Error: 'taskkill' command not found. Ensure it is in your PATH.")
+            return -1
+        except Exception as e:
+            print(f"An error occurred on Windows: {e}")
+            return -1
+    else:
+        print(f"Unsupported operating system: {sys.platform}")
+        return 0
+
+
+
+# Function to convert PPT/PPTX to PDF on Linux
+
+def convert_doc_to_pdf_linux(doc_path, pdf_path, libreoffice_path:str = '/usr/bin/soffice', timeout =100):
+    """Convert the docx file to pdfusing libreoffice """
+    libreoffice_path = libreoffice_path
+    try:
+        subprocess.run([libreoffice_path, '--headless', '--convert-to', 'pdf', doc_path, '--outdir', os.path.dirname(pdf_path)], timeout = timeout)
+        logging.info(f'Converted {doc_path} to {pdf_path}')
+        print(f'Converted {doc_path} to {pdf_path}')
+        return pdf_path
+    except Exception as e:
+        logging.error(e)
+        print(e)
+        kill_val = kill_soffice_bin_subprocess_method(force=True)
+        print(f"Process killing {kill_val}")
+        return None

@@ -7,10 +7,18 @@ from azure.storage.blob import BlobServiceClient, BlobClient, ContainerClient
 from typing import Optional, Dict, List, Any, Union
 from azure.ai.ml.entities import Data
 from azure.ai.ml.constants import AssetTypes
-from nlputils import utils
-from nlputils.components.docling_util import doclingserver
+from ..nlputils import utils
+from ..nlputils.components.docling_util import doclingserver
 import pandas as pd
+from tqdm import tqdm
 import json
+from collections import defaultdict
+from tqdm import tqdm
+import subprocess
+import sys
+import os
+
+
 
 def read_files_dataassets(
     data_asset_name: str,
@@ -79,6 +87,36 @@ def read_files_dataassets(
         logging.error(f"Error listing files in data asset: {e}")
         print(f"Error listing files in data asset: {data_asset_name}, error: {e}")
         return None 
+
+
+def files_by_extensions(file_list):
+    """
+    Sorts a list of filenames by their file extension and organizes them
+    into a dictionary.
+
+    Args:
+        filenames (List[str]): A list of filenames (can include full paths).
+
+    Returns:
+        Dict[str, List[str]]: A dictionary where keys are file extensions (e.g., 'txt', 'csv', 'json')
+                              and values are lists of filenames with that extension.
+                              The extensions will be lowercase.
+    """
+    files_by_extension = defaultdict(list)
+    for filename in file_list:
+        # os.path.splitext splits a path into (root, ext)
+        # We take the extension part and remove the leading dot
+        _, ext = os.path.splitext(filename)
+        
+        # Ensure extension is lowercase for consistent grouping
+        # If there's no extension (e.g., "README"), ext will be an empty string.
+        # We'll use a placeholder like "no_extension" for clarity if needed,
+        # but for now, an empty string is fine.
+        clean_ext = ext.lstrip('.').lower()
+
+        files_by_extension[clean_ext].append(filename)
+    return dict(files_by_extension)
+
     
 
 def download_files_dataassets(
@@ -156,13 +194,15 @@ def download_files_dataassets(
     lst: List[str] = []
     try:
         files_to_download = fs.ls(folder_to_download) if folder_to_download else fs.ls()  # Corrected logic
-        for file_path in files_to_download:
+        logging.info(f"total files to download:{len(files_to_download)}")
+        print(f"total files to download:{len(files_to_download)}")
+        for file_path in tqdm(files_to_download):
             if fs.isfile(file_path):
                 local_file_path = os.path.join(local_download_folder, os.path.basename(file_path))
                 with fs.open(file_path, "rb") as remote_file, open(local_file_path, "wb") as local_file:
                     local_file.write(remote_file.read())
                 logging.info(f"Downloaded '{file_path}' to '{local_file_path}'")
-                print(f"Downloaded '{file_path}' to '{local_file_path}'")
+                #print(f"Downloaded '{file_path}' to '{local_file_path}'")
                 lst.append(local_file_path)
     except Exception as e:
         logging.error(f"Error during file download: {e}")
@@ -343,8 +383,35 @@ def upload_folder_to_datastore(
         return True
 
 
-def create_batches(files: List[str],
-                   file_extensions: Union[List[str], str] = ['pdf', 'docx'],
+def azure_convert_docxfiles(docx_list, local_download_folder = None):
+    """
+    convert all docx files in list to pdf and saves them to new dir or in a sub-dir 
+    'docx_to_path' in base dir. Alternatively you can call docx2pdf.convert('dirname') to 
+    convert all docx files to pdf in same dir.
+
+    """
+    #files_df = pd.DataFrame(docx_list, columns=['docx_path'])
+    #files_df['filename'] = files_df.docx_path.apply(lambda x: os.path.splitext(os.path.basename(x))[0])
+
+    if not local_download_folder:
+        local_download_folder = f"/tmp/{data_asset_name}"
+        os.makedirs(local_download_folder, exist_ok=True)
+
+    # docx_df['pdf_path'] = docx_df.filepath.progress_apply(lambda x: convert_doc_to_pdf_linux(x, local_download_folder + '/docx_to_pdf/' + os.path.splitext(os.path.basename(x))[0] + '.pdf'))
+    pdf_list= []
+    for file in tqdm(docx_list):
+        new_path = os.path.join(local_download_folder + 'docx_to_pdf/')
+        if not os.path.exists(new_path):
+            os.makedirs(new_path, exist_ok=True)
+        new_path = new_path + os.path.splitext(os.path.basename(file))[0] + '.pdf'
+        pdf_list.append(utils.convert_doc_to_pdf_linux(file,new_path))
+    
+    return pdf_list
+
+
+
+def create_batches(files: List[str], local_download_folder = None,
+                   file_extensions: Union[List[str], str] = ['pdf', 'docx'], docx_to_pdf:bool =False,
                    batch_size: int = 20 , processing_folder:str = None) -> Dict[str, pd.DataFrame]:
     """
     Organizes files into a dictionary of pandas DataFrames, categorized by file type,
@@ -355,6 +422,7 @@ def create_batches(files: List[str],
         file_extensions (Union[List[str], str], optional): A list of file extensions to process
             (e.g., ['pdf', 'docx']) or "*" to process all files.
             Defaults to ['pdf', 'docx'].
+        docx_to_pdf(bool): To conver thte docx to pdf or not, Defualt to False
         batch_size (int, optional): The number of files per batch. Defaults to 20.
         processing_folder (str): Save the batch files in a folder, Defualt to None (will use current working dir)
 
@@ -402,9 +470,14 @@ def create_batches(files: List[str],
         return {} # Return empty dict
 
     logging.info(f"Created DataFrame with {len(df_files)} files.")
+    print(f"Created DataFrame with {len(df_files)} files.")
 
     # Get page count and ImagePDF status
+    logging.info("getting page counts")
+    print("getting page counts")
     df_files['page_count'] = df_files.filepath.apply(lambda x: utils.get_page_count(x))
+    logging.info("checking for image pdfs")
+    print("checking for image pdf")
     df_files['ImagePDF'] = df_files.apply(
         lambda x: utils.check_if_imagepdf(x['filepath']) if x['filetype'] == 'pdf' else False,
         axis=1
@@ -427,6 +500,7 @@ def create_batches(files: List[str],
                 .sort_values(by='filename', ignore_index=True)
 
     # Assign batches
+    print("creating batches")
     for key, df in file_list_dfs.items():
         batches = [(index // batch_size) + 1 for index in df.index] # use list comprehension
         df['batch'] = batches
@@ -447,7 +521,19 @@ def create_batches(files: List[str],
             json_filename = f"{key}_files.json"
             df.to_json(json_filename, orient="records", indent=4)  # Save as JSON
             logging.info(f"Saved DataFrame for {key} to {json_filename}")
-        
+
+    if docx_to_pdf == True:
+        logging.info("docx 2 pdf conversion starting")
+        print("docx to pdf conversion starting")
+        docx2pdf_files = azure_convert_docxfiles(file_list_dfs['docx'].filepath.tolist(), local_download_folder=local_download_folder)
+        print("docx to pdf conversion done")
+        df = file_list_dfs['docx'].copy()
+        df['filepath'] = docx2pdf_files
+        df['filetype'] = 'pdf'
+        json_filename = os.path.join(processing_folder, "docx2pdf_files.json")
+        df.to_json(json_filename, orient='records', indent = 4)
+        file_list_dfs['docx_to_pdf'] = df
+           
     return file_list_dfs
 
 
@@ -870,3 +956,5 @@ def df_with_docling_json(
         return data_asset.path +'docling/' + 'docling_json_dataframe.json'
     else:
         return df
+
+
