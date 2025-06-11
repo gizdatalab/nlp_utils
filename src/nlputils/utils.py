@@ -65,7 +65,7 @@ def find_files_by_extension(search_path, extension, recursive=False):
     
 def get_files(root_folder:str,file_extensions=['pdf','docx'], recursive=True)->dict | None:
     """returns the files with extension provided in the root folder, 
-        use recursive flag to do search recursively or not
+        use recursive flag to do search recursively or not, file extension are case-sensitive
        
         Params
         ----------

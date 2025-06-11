@@ -14,6 +14,7 @@ from tqdm import tqdm
 import json
 from collections import defaultdict
 from tqdm import tqdm
+from importlib.metadata import version
 import subprocess
 import sys
 import os
@@ -23,7 +24,8 @@ import os
 def read_files_dataassets(
     data_asset_name: str,
     data_asset_version: str,
-    list_files: bool = True
+    list_files: bool = True,
+    recursive:bool = True,
 ) -> Optional[List[str]]:
     """
     Retrieves and optionally lists files from a specified version of an Azure Machine Learning data asset.
@@ -73,21 +75,40 @@ def read_files_dataassets(
         return None
 
     # 5. List and Optionally return Files list
-    try:
-        all_paths = fs.ls()
-        logging.info(f"Found {len(all_paths)} files in data asset '{data_asset_name}':{data_asset_version}")
-        print(f"All paths in the data asset '{data_asset_name}':")
-        for pt in all_paths:
-            print(pt)
-        if list_files:
-            return all_paths  # Return the list of paths
-        else: 
-            return None #If list_files is false, return None
-    except Exception as e:
-        logging.error(f"Error listing files in data asset: {e}")
-        print(f"Error listing files in data asset: {data_asset_name}, error: {e}")
-        return None 
-
+    if recursive == False:
+        logging.error("reading files")
+        print("reading files")
+        try:
+            all_paths = fs.ls()
+            logging.info(f"Found {len(all_paths)} files in data asset '{data_asset_name}':{data_asset_version}")
+            print(f"All paths in the data asset '{data_asset_name}':")
+            for pt in all_paths:
+                print(pt)
+            if list_files:
+                return all_paths  # Return the list of paths
+            else: 
+                return None #If list_files is false, return None
+        except Exception as e:
+            logging.error(f"Error listing files in data asset: {e}")
+            print(f"Error listing files in data asset: {data_asset_name}, error: {e}")
+            return None 
+    else:
+        try:
+            logging.error("reading files recursively")
+            print("reading files recursively")
+            all_paths = fs.glob("**")
+            all_paths = [f for f in all_paths if fs.isfile(f)]
+            
+            for pt in all_paths:
+                print(pt)
+            if list_files:
+                return all_paths  # Return the list of paths
+            else: 
+                return None
+        except Exception as e:
+            logging.error(f"Error listing files in data asset: {e}")
+            print(f"Error listing files in data asset: {data_asset_name}, error: {e}")
+            return None 
 
 def files_by_extensions(file_list):
     """
@@ -123,6 +144,7 @@ def download_files_dataassets(
     data_asset_name: str,
     data_asset_version: str,
     folder_to_download: Optional[str] = None,
+    recursive = False,
     local_download_folder: Optional[str] = None,
     get_metadata: bool = True,
 ) -> Optional[Dict[str, Any]]:
@@ -189,16 +211,31 @@ def download_files_dataassets(
         logging.error(f"Error initializing AzureMachineLearningFileSystem: {e}")
         print(f"Error initializing AzureMachineLearningFileSystem: {e}")
         return None
-
+    print("downloading")
     # 6. Download Files
     lst: List[str] = []
     try:
-        files_to_download = fs.ls(folder_to_download) if folder_to_download else fs.ls()  # Corrected logic
+        if folder_to_download and not recursive:
+            files_to_download = fs.ls(folder_to_download) 
+            
+        if folder_to_download and recursive:
+            all_paths = fs.glob(folder_to_download + "**")
+            files_to_download = [f for f in all_paths if fs.isfile(f)]
+            
+        if not folder_to_download and not recursive:
+            files_to_download = fs.ls()
+            
+        if not folder_to_download and recursive:
+            all_paths = fs.glob("**")
+            files_to_download = [f for f in all_paths if fs.isfile(f)]
+            
         logging.info(f"total files to download:{len(files_to_download)}")
         print(f"total files to download:{len(files_to_download)}")
         for file_path in tqdm(files_to_download):
             if fs.isfile(file_path):
-                local_file_path = os.path.join(local_download_folder, os.path.basename(file_path))
+                local_file_path = os.path.join(local_download_folder, file_path)
+                os.makedirs(os.path.split(local_file_path)[0], exist_ok=True)
+                #local_file_path = os.path.join(local_download_folder, os.path.basename(file_path))
                 with fs.open(file_path, "rb") as remote_file, open(local_file_path, "wb") as local_file:
                     local_file.write(remote_file.read())
                 logging.info(f"Downloaded '{file_path}' to '{local_file_path}'")
@@ -223,13 +260,13 @@ def download_files_dataassets(
 
 def upload_folder_to_datastore(
     datastore_name: str,
-    storage_account_key: str,
     local_folder_path: str,
     destination_path: str,  # Path within the datastore
     relative_path_for_asset:str,
     create_data_asset: bool = False, #flag to create data asset
     data_asset_name: Optional[str] = None,
-    data_asset_version: Optional[str] = None
+    data_asset_version: Optional[str] = None,
+    storage_account_key: Optional[str] = None,
 ) -> None:
     """
     Uploads a local folder from the Azure ML workspace's file system to a specified datastore
@@ -259,8 +296,6 @@ def upload_folder_to_datastore(
         raise ValueError("destination_path must be provided.")
     if create_data_asset and not data_asset_name:
         raise ValueError("data_asset_name must be provided when create_data_asset is True.")
-    if not storage_account_key:
-        raise ValueError("account access key must be provided.")
 
 
     # 2. Connect to Azure ML Workspace
@@ -283,61 +318,88 @@ def upload_folder_to_datastore(
         return None
     print("getting datastore")
 
-    # 4. Connect to datastore using blob-client
-    try:
-        blob_service_client = BlobServiceClient(account_url=f"https://{storage_account}.blob.core.windows.net", credential=storage_account_key) 
-        container_client = blob_service_client.get_container_client(container_name)
-        folder_path = destination_path
-        blob_list = container_client.list_blobs(name_starts_with=folder_path)
-        if any(blob.name.startswith(folder_path) for blob in blob_list):
-            logging.info(f"Folder (blob prefix) '{folder_path}' already exists.")
-            print(f"Folder (blob prefix) '{folder_path}' already exists.")
-        else:
-            logging.info(f"Folder (blob prefix) '{folder_path}' does not exist. Creating it.")
-            print(f"Folder (blob prefix) '{folder_path}' does not exist. Creating it.")
-            # 4. Create the folder (by creating an empty blob with the folder name)
-            blob_client = blob_service_client.get_blob_client(container = container_name, blob=folder_path)
-            blob_client.upload_blob(data=b"", overwrite=True)  # Create an empty blob
-            logging.info(f"Folder (blob prefix) '{folder_path}' created.")
-            print(f"Folder (blob prefix) '{folder_path}' created.")   
-    except Exception as e:
-        logging.error(f"Error accessing the  blob container doesnt exist, Check storage_account key or if container in Storage account {storage_account} exists or not")   
-        print(f"Error accessing the  blob container doesnt exist, Check storage_account key or if container in Storage account {storage_account} exists or not")
-        return None
-    print("connect with blob client")
     
+    # 4.1 Connect to datastore using blob-client
+    if storage_account_key:
+        try:
+            blob_service_client = BlobServiceClient(account_url=f"https://{storage_account}.blob.core.windows.net", credential=storage_account_key) 
+            container_client = blob_service_client.get_container_client(container_name)
+            folder_path = destination_path
+            blob_list = container_client.list_blobs(name_starts_with=folder_path)
+            if any(blob.name.startswith(folder_path) for blob in blob_list):
+                logging.info(f"Folder (blob prefix) '{folder_path}' already exists.")
+                print(f"Folder (blob prefix) '{folder_path}' already exists.")
+            else:
+                logging.info(f"Folder (blob prefix) '{folder_path}' does not exist. Creating it.")
+                print(f"Folder (blob prefix) '{folder_path}' does not exist. Creating it.")
+                # 4. Create the folder (by creating an empty blob with the folder name)
+                blob_client = blob_service_client.get_blob_client(container = container_name, blob=folder_path)
+                blob_client.upload_blob(data=b"", overwrite=True)  # Create an empty blob
+                logging.info(f"Folder (blob prefix) '{folder_path}' created.")
+                print(f"Folder (blob prefix) '{folder_path}' created.")   
+        except Exception as e:
+            logging.error(f"Error accessing the  blob container doesnt exist, Check storage_account key or if container in Storage account {storage_account} exists or not")   
+            print(f"Error accessing the  blob container doesnt exist, Check storage_account key or if container in Storage account {storage_account} exists or not")
+            return None
+        print("connect with blob client")
+    # 4.2 Connect to datastore using Azure file system
+    else:
+        try:
+            fs =AzureMachineLearningFileSystem("azureml:/" +datastore.id)
+            folder_path = destination_path
+        except Exception as e:
+            logging.error(e)
+            print("Error in accessing the datastore {datastore_name}")
 
-    # 5. Upload the Folder
-    try:
-        # blob_storage_upload_folder = f"{datastore.name}/{destination_path}/"  # Combine datastore name and destination
-        # bcontainer_client = blob_service_client.get_container_client(container_name)
-        # print(blob_storage_upload_folder)
+    # 5.1 Upload the Folder  suing blob client
+    if storage_account_key:
+        try:
+            # blob_storage_upload_folder = f"{datastore.name}/{destination_path}/"  # Combine datastore name and destination
+            # bcontainer_client = blob_service_client.get_container_client(container_name)
+            # print(blob_storage_upload_folder)
 
-        # Walk through the local folder
-        for root, _, files in os.walk(local_folder_path):
-            for file_name in files:
-                local_file_path = os.path.join(root, file_name)
-                # Calculate the relative path, important for preserving folder structure in Blob Storage
-                relative_path = os.path.relpath(local_file_path, local_folder_path)
-                # Construct the full blob name, combining the destination folder and relative path
-                blob_name = destination_path + relative_path.replace("\\", "/")  # Ensure forward slashes in blob names
-                print(blob_name)
-                # 5.1 Upload each file
-                with open(local_file_path, "rb") as data:
-                    blob_client = blob_service_client.get_blob_client(container=container_name, blob=blob_name)
-                    blob_client.upload_blob(data, overwrite=True)
-                logging.info(f"Uploaded '{local_file_path}' to '{blob_name}'")
-                print(f"Uploaded '{local_file_path}' to '{blob_name}'")
+            # Walk through the local folder
+            for root, _, files in os.walk(local_folder_path):
+                for file_name in files:
+                    local_file_path = os.path.join(root, file_name)
+                    # Calculate the relative path, important for preserving folder structure in Blob Storage
+                    relative_path = os.path.relpath(local_file_path, local_folder_path)
+                    # Construct the full blob name, combining the destination folder and relative path
+                    blob_name = destination_path + relative_path.replace("\\", "/")  # Ensure forward slashes in blob names
+                    print(blob_name)
+                    # 5.1 Upload each file
+                    with open(local_file_path, "rb") as data:
+                        blob_client = blob_service_client.get_blob_client(container=container_name, blob=blob_name)
+                        blob_client.upload_blob(data, overwrite=True)
+                    logging.info(f"Uploaded '{local_file_path}' to '{blob_name}'")
+                    print(f"Uploaded '{local_file_path}' to '{blob_name}'")
 
 
-    except Exception as e:
-        logging.error(f"Error uploading folder:{local_folder_path} to datastore:{datastore_name}")
-        print(f"Error uploading folder:{local_folder_path} to datastore:{datastore_name}")
-        return None
-    print("upload complete")
-    
+        except Exception as e:
+            logging.error(f"Error uploading folder:{local_folder_path} to datastore:{datastore_name}")
+            print(f"Error uploading folder:{local_folder_path} to datastore:{datastore_name}")
+            return None
+        print("upload complete")
+    else:
+        try:
+            for root, _, files in os.walk(local_folder_path):
+                    for file_name in files:
+                        local_file_path = os.path.join(root, file_name)
+                        # Calculate the relative path, important for preserving folder structure in Blob Storage
+                        relative_path = os.path.relpath(local_file_path, local_folder_path)
+                        blob_name = folder_path + relative_path.replace("\\", "/")
+                        fs.upload(lpath= local_file_path, rpath = os.path.split(blob_name)[0], recursive =False, **{'overwrite': 'MERGE_WITH_OVERWRITE'})
+                        logging.info(f"Uploaded '{local_file_path}' to '{blob_name}'")
+                        print(f"Uploaded '{local_file_path}' to '{blob_name}'")
+        except Exception as e:
+            logging.error(f"Error uploading folder:{local_folder_path} to datastore:{datastore_name}")
+            print(f"Error uploading folder:{local_folder_path} to datastore:{datastore_name}")
+            return None
+        print("upload complete")
 
-    # 5. Create Data Asset (Optional)
+
+
+    # 4. Create Data Asset (Optional)
     if create_data_asset:
         # Input Validation
         if not data_asset_name:
@@ -380,10 +442,12 @@ def upload_folder_to_datastore(
             print(f"Created data asset: {data_asset.name}, version: {data_asset.version}")
             return True
     else:
-        return True
+        return True      
+
+    
 
 
-def azure_convert_docxfiles(docx_list, local_download_folder = None):
+def azure_convert_docxfiles(docx_list, data_asset_name, local_download_folder = None):
     """
     convert all docx files in list to pdf and saves them to new dir or in a sub-dir 
     'docx_to_path' in base dir. Alternatively you can call docx2pdf.convert('dirname') to 
@@ -410,7 +474,7 @@ def azure_convert_docxfiles(docx_list, local_download_folder = None):
 
 
 
-def create_batches(files: List[str], local_download_folder = None,
+def create_batches(files: List[str], local_download_folder = None, data_asset_name = "none",
                    file_extensions: Union[List[str], str] = ['pdf', 'docx'], docx_to_pdf:bool =False,
                    batch_size: int = 20 , processing_folder:str = None) -> Dict[str, pd.DataFrame]:
     """
@@ -525,7 +589,9 @@ def create_batches(files: List[str], local_download_folder = None,
     if docx_to_pdf == True:
         logging.info("docx 2 pdf conversion starting")
         print("docx to pdf conversion starting")
-        docx2pdf_files = azure_convert_docxfiles(file_list_dfs['docx'].filepath.tolist(), local_download_folder=local_download_folder)
+        docx2pdf_files = azure_convert_docxfiles(file_list_dfs['docx'].filepath.tolist(), 
+                                                 data_asset_name = data_asset_name, 
+                                                 local_download_folder=local_download_folder)
         print("docx to pdf conversion done")
         df = file_list_dfs['docx'].copy()
         df['filepath'] = docx2pdf_files
@@ -654,8 +720,6 @@ def azure_process_batch(
     #     raise ValueError("batch_val must be an str")
     if not isinstance(filetype, str):
         raise ValueError("filetype must be a string")
-    if not isinstance(storage_account_key, str):
-        raise ValueError("storage_account_key must be a string")
     if not isinstance(datastore_name, str):
         raise ValueError("datastore_name must be a string")
     if not isinstance(local_folder_path, str):
@@ -771,13 +835,14 @@ def azure_process_batch(
 
 def batch_handler(
     processing_folder: str,
-    storage_account_key: str,
     datastore_name: str,
     local_folder_path: str,
     destination_path: str,
     data_asset_name: str,
     data_asset_version: str,
     create_data_asset: bool = True,
+    storage_account_key: str = None,
+    batch_run:Dict[str, list[int]] = None
 ) -> None:
     """
     Handles the processing of batches of files for different file types.  It reads file
@@ -804,8 +869,6 @@ def batch_handler(
     # Input Validation
     if not isinstance(processing_folder, str):
         raise ValueError("processing_folder must be a string")
-    if not isinstance(storage_account_key, str):
-        raise ValueError("storage_account_key must be a string")
     if not isinstance(datastore_name, str):
         raise ValueError("datastore_name must be a string")
     if not isinstance(local_folder_path, str):
@@ -831,51 +894,106 @@ def batch_handler(
     else:
         batch_logs = pd.DataFrame(columns=['filetype', 'batch'])
 
-    for filetype in files_df.keys():  
-        logging.info(f"Processing {filetype} files")
-        print(f"Processing {filetype} files")
-        batches = files_df[filetype].batch.unique()
+    for filetype in files_df.keys(): 
+        ###############################################################
 
-        for batch_val in batches:
-            if batch_val in list(batch_logs[batch_logs.filetype == filetype].batch): # use .values
-                logging.info(f"Batch {batch_val} for {filetype} already processed, skipping.")
-                print(f"Batch {batch_val}  for {filetype} already processed , skipping")
-                check = False
-                continue  # Use continue for clarity
+        if not batch_run:
+            logging.info(f"Processing {filetype} files")
+            print(f"Processing {filetype} files")
+            batches = files_df[filetype].batch.unique()
 
-            else:
-                logging.info(f"Starting batch {batch_val} for {filetype}")
-                print(f"Starting batch {batch_val}")
-                df = files_df[filetype]
+            for batch_val in batches:
+                if batch_val in list(batch_logs[batch_logs.filetype == filetype].batch): # use .values
+                    logging.info(f"Batch {batch_val} for {filetype} already processed, skipping.")
+                    print(f"Batch {batch_val}  for {filetype} already processed , skipping")
+                    check = False
+                    continue  # Use continue for clarity
 
-                check = azure_process_batch(
-                    df=df,
-                    batch_val=batch_val,
-                    filetype=filetype,
-                    datastore_name=datastore_name,
-                    storage_account_key=storage_account_key,
-                    local_folder_path=local_folder_path,
-                    destination_path=destination_path,
-                    create_data_asset=create_data_asset,
-                    data_asset_name=data_asset_name,
-                    processing_folder=processing_folder,  # Pass processing_folder
-                    data_asset_version=data_asset_version,
-                )
-
-                if check:
-                    batch_logs.loc[len(batch_logs)] = [filetype, batch_val]
-                    try:
-                        os.makedirs(os.path.join(processing_folder, "files_info/batch_logger/"), exist_ok=True)
-                        json_filename = os.path.join(processing_folder, f"files_info/batch_logger/batch_logs.json")
-                        batch_logs.to_json(json_filename, orient="records", indent=4)
-                        logging.info(f"Saved batch log to {json_filename}")
-                    except OSError as e:
-                        raise OSError(f"Error saving batch logs to {json_filename}: {e}") from e
                 else:
-                    logging.error(f"Processing batch {batch_val} for {filetype} failed.")
-                    print(f"Processing batch {batch_val} for {filetype} failed.")
-                    # Decide if you want to continue processing other batches/filetypes
-                    # or raise an exception here.  For now, I'll continue.
+                    logging.info(f"Starting batch {batch_val} for {filetype}")
+                    print(f"Starting batch {batch_val}")
+                    #df = files_df[filetype]
+                    df = read_json_files_to_dfs(files_info_path)
+                    df = df[filetype]
+                    check = azure_process_batch(
+                        df=df,
+                        batch_val=batch_val,
+                        filetype=filetype,
+                        datastore_name=datastore_name,
+                        storage_account_key=storage_account_key,
+                        local_folder_path=local_folder_path,
+                        destination_path=destination_path,
+                        create_data_asset=create_data_asset,
+                        data_asset_name=data_asset_name,
+                        processing_folder=processing_folder,  # Pass processing_folder
+                        data_asset_version=data_asset_version,
+                    )
+
+                    if check:
+                        batch_logs = pd.read_json(processing_folder+"files_info/batch_logger/batch_logs.json")
+                        batch_logs.loc[len(batch_logs)] = [filetype, batch_val]
+                        try:
+                            os.makedirs(os.path.join(processing_folder, "files_info/batch_logger/"), exist_ok=True)
+                            json_filename = os.path.join(processing_folder, f"files_info/batch_logger/batch_logs.json")
+                            batch_logs.to_json(json_filename, orient="records", indent=4)
+                            logging.info(f"Saved batch log to {json_filename}")
+                        except OSError as e:
+                            raise OSError(f"Error saving batch logs to {json_filename}: {e}") from e
+                    else:
+                        logging.error(f"Processing batch {batch_val} for {filetype} failed.")
+                        print(f"Processing batch {batch_val} for {filetype} failed.")
+                        # Decide if you want to continue processing other batches/filetypes
+                        # or raise an exception here.  For now, I'll continue.
+        else:
+            if filetype in batch_run.keys():
+                logging.info(f"Processing {filetype} files")
+                print(f"Processing {filetype} files")
+                batches = files_df[filetype].batch.unique()
+                batches_to_run = batch_run[filetype]
+
+                for batch_val in batches:
+                    if batch_val in batches_to_run:                            
+                        if batch_val in list(batch_logs[batch_logs.filetype == filetype].batch): # use .values
+                            logging.info(f"Batch {batch_val} for {filetype} already processed, skipping.")
+                            print(f"Batch {batch_val}  for {filetype} already processed , skipping")
+                            check = False
+                            continue  # Use continue for clarity
+                        
+
+                        else:
+                            logging.info(f"Starting batch {batch_val} for {filetype}")
+                            print(f"Starting batch {batch_val}")
+                            # df = files_df[filetype]
+                            df = read_json_files_to_dfs(files_info_path)
+                            df = df[filetype]
+                            check = azure_process_batch(
+                                df=df,
+                                batch_val=batch_val,
+                                filetype=filetype,
+                                datastore_name=datastore_name,
+                                storage_account_key=storage_account_key,
+                                local_folder_path=local_folder_path,
+                                destination_path=destination_path,
+                                create_data_asset=create_data_asset,
+                                data_asset_name=data_asset_name,
+                                processing_folder=processing_folder,  # Pass processing_folder
+                                data_asset_version=data_asset_version,
+                            )
+
+                            if check:
+                                batch_logs = pd.read_json(processing_folder+"files_info/batch_logger/batch_logs.json")
+                                batch_logs.loc[len(batch_logs)] = [filetype, batch_val]
+                                try:
+                                    os.makedirs(os.path.join(processing_folder, "files_info/batch_logger/"), exist_ok=True)
+                                    json_filename = os.path.join(processing_folder, f"files_info/batch_logger/batch_logs.json")
+                                    batch_logs.to_json(json_filename, orient="records", indent=4)
+                                    logging.info(f"Saved batch log to {json_filename}")
+                                except OSError as e:
+                                    raise OSError(f"Error saving batch logs to {json_filename}: {e}") from e
+                            else:
+                                logging.error(f"Processing batch {batch_val} for {filetype} failed.")
+                                print(f"Processing batch {batch_val} for {filetype} failed.")
+                
     logging.info("Batch processing completed.")
     print("Batch processing completed.")
 
@@ -889,6 +1007,7 @@ def df_with_docling_json(
         destination_path: str,  # Added destination_path as a parameter
         file_types: List[str] = ['docx', 'pdf', 'imagepdf'],
         upload_df: bool = True,
+        processor: str = "docling",
         local_download_folder: Optional[str] = None, # Added local_download_folder
     ) -> pd.DataFrame | str:
     """
@@ -900,6 +1019,7 @@ def df_with_docling_json(
         processed_data_asset_version: Version of the processed data asset.
         processing_folder: Path within the data asset where files are located (e.g., 'my_folder/').
         destination_path: Path within the data asset where the output dataframe should be saved
+        processor: defaults to "docling"
         file_types: List of file types to process (e.g., ['docx', 'pdf']).
         upload_df: Whether to upload the DataFrame to the data asset.
         local_download_folder: Local folder where files are downloaded.
@@ -929,9 +1049,9 @@ def df_with_docling_json(
         if key in file_types:
             val['data_asset'] = [{'data_asset_name':processed_data_asset_name,
                                 'data_asset_version':processed_data_asset_version}]*len(val)
-            val['rel_path_data_asset'] = val['filepath'].apply(lambda x: f"{key}/" + os.path.splitext(x[len(f"/tmp/{data_asset_name}/"):])[0] +"/"
-                                                                            if local_download_folder == None else
-                                                                            f"{key}/" + os.path.splitext(x[len(local_folder_path):])[0] +"/" )
+            val['rel_path_data_asset'] = val['filename'].apply(lambda x: f"{key}/" + os.path.splitext(x)[0] +"/" )
+            val['raw_docs_rel_path'] = val.filepath.apply(lambda x: os.path.relpath(x, local_download_folder) if "docx_to_pdf" not in x else None)
+            
             val['destination_path'] = destination_path
             df_list.append(val)
 
@@ -942,18 +1062,23 @@ def df_with_docling_json(
         return pd.DataFrame()
 
     df = pd.concat(df_list,ignore_index=True)
-
+    
+    
     df['json_file'] = df.apply(lambda x: read_json_file(data_asset.path + x['rel_path_data_asset'] + os.path.splitext(x['filename'])[0]+".json")
                                     if x['uploaded'] == True else None, axis=1)
+    df['processor'] = processor + "==" + version(processor)
+    df['tags'] = data_asset.tags
+    df.drop(columns = ['filepath','batch','processed','uploaded'], inplace=True)
 
+    
     if upload_df:  
         try:
             df.to_json("/tmp/docling_json_dataframe.json", orient="records", indent=4)
-            fs.upload(lpath='/tmp/docling_json_dataframe.json', rpath=data_asset.path +'docling/', recursive=False, **{'overwrite': 'MERGE_WITH_OVERWRITE'})
+            fs.upload(lpath="/tmp/docling_json_dataframe.json", rpath=data_asset.path +'docling/', recursive=False, **{'overwrite': 'MERGE_WITH_OVERWRITE'})
         except Exception as e:
             print(f"Error uploading dataframe: {e}")
             return df
-        return data_asset.path +'docling/' + 'docling_json_dataframe.json'
+        return data_asset.path + 'docling/' +  'docling_json_dataframe.json'
     else:
         return df
 
