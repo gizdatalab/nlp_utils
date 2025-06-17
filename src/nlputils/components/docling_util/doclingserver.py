@@ -435,7 +435,7 @@ def hybrid_chunking(folder_location,embed_model_id, max_tokens= None, exclude_me
     return folder_location+ "/chunks.json"
     
 
-def hybrid_chunking_memory(filename, doc_dict, embed_model_id, max_tokens= None, exclude_metadata: dict = None):
+def hybrid_chunking_memory(filename, doc_dict, embed_model_id, hybrid_chunker = None, max_tokens= None, exclude_metadata: dict = None):
     """
     this is adaptation of hybrid chunking (headings) imlemented for docling.Document
 
@@ -476,14 +476,17 @@ def hybrid_chunking_memory(filename, doc_dict, embed_model_id, max_tokens= None,
     #         doc_dict = json.load(fp)
         doc = DoclingDocument.model_validate(doc_dict)
     except Exception as e:
-        logging.error("corrupt")
-        print("corrupt")
+        logging.error(e)
+        print(f"docling json of {filename} is corrupt ")
         return None
     # define chunker
-    if max_tokens is None:
-        chunker = HybridChunker(tokenizer=embed_model_id)
+    if hybrid_chunker:
+        chunker = hybrid_chunker
     else:
-        chunker = HybridChunker(tokenizer=embed_model_id, max_tokens=max_tokens)
+        if max_tokens is None:
+            chunker = HybridChunker(tokenizer=embed_model_id)
+        else:
+            chunker = HybridChunker(tokenizer=embed_model_id, max_tokens=max_tokens)
     
     # chunking
     chunk_iter = chunker.chunk(doc)
@@ -537,7 +540,10 @@ def hybrid_chunking_memory(filename, doc_dict, embed_model_id, max_tokens= None,
             'content_layer': tmp_content_layer,
             'label': tmp_label,
             'heading': tmp_heading,
-            'chunk_length': tmp_chunk_length}
+            'chunk_length': tmp_chunk_length,
+            'index':i,
+            'tokenizer_model_id':embed_model_id,
+            'tokenizer_max_tokens': max_tokens}
 
         # Exclusion criteria 
         if exclude_metadata: 

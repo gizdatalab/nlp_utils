@@ -898,101 +898,117 @@ def batch_handler(
         ###############################################################
 
         if not batch_run:
-            logging.info(f"Processing {filetype} files")
-            print(f"Processing {filetype} files")
-            batches = files_df[filetype].batch.unique()
-
-            for batch_val in batches:
-                if batch_val in list(batch_logs[batch_logs.filetype == filetype].batch): # use .values
-                    logging.info(f"Batch {batch_val} for {filetype} already processed, skipping.")
-                    print(f"Batch {batch_val}  for {filetype} already processed , skipping")
-                    check = False
-                    continue  # Use continue for clarity
-
-                else:
-                    logging.info(f"Starting batch {batch_val} for {filetype}")
-                    print(f"Starting batch {batch_val}")
-                    #df = files_df[filetype]
-                    df = read_json_files_to_dfs(files_info_path)
-                    df = df[filetype]
-                    check = azure_process_batch(
-                        df=df,
-                        batch_val=batch_val,
-                        filetype=filetype,
-                        datastore_name=datastore_name,
-                        storage_account_key=storage_account_key,
-                        local_folder_path=local_folder_path,
-                        destination_path=destination_path,
-                        create_data_asset=create_data_asset,
-                        data_asset_name=data_asset_name,
-                        processing_folder=processing_folder,  # Pass processing_folder
-                        data_asset_version=data_asset_version,
-                    )
-
-                    if check:
-                        batch_logs = pd.read_json(processing_folder+"files_info/batch_logger/batch_logs.json")
-                        batch_logs.loc[len(batch_logs)] = [filetype, batch_val]
-                        try:
-                            os.makedirs(os.path.join(processing_folder, "files_info/batch_logger/"), exist_ok=True)
-                            json_filename = os.path.join(processing_folder, f"files_info/batch_logger/batch_logs.json")
-                            batch_logs.to_json(json_filename, orient="records", indent=4)
-                            logging.info(f"Saved batch log to {json_filename}")
-                        except OSError as e:
-                            raise OSError(f"Error saving batch logs to {json_filename}: {e}") from e
-                    else:
-                        logging.error(f"Processing batch {batch_val} for {filetype} failed.")
-                        print(f"Processing batch {batch_val} for {filetype} failed.")
-                        # Decide if you want to continue processing other batches/filetypes
-                        # or raise an exception here.  For now, I'll continue.
-        else:
-            if filetype in batch_run.keys():
+            if not files_df[filetype].empty:
                 logging.info(f"Processing {filetype} files")
                 print(f"Processing {filetype} files")
                 batches = files_df[filetype].batch.unique()
-                batches_to_run = batch_run[filetype]
-
+            
                 for batch_val in batches:
-                    if batch_val in batches_to_run:                            
-                        if batch_val in list(batch_logs[batch_logs.filetype == filetype].batch): # use .values
-                            logging.info(f"Batch {batch_val} for {filetype} already processed, skipping.")
-                            print(f"Batch {batch_val}  for {filetype} already processed , skipping")
-                            check = False
-                            continue  # Use continue for clarity
-                        
+                    if batch_val in list(batch_logs[batch_logs.filetype == filetype].batch): # use .values
+                        logging.info(f"Batch {batch_val} for {filetype} already processed, skipping.")
+                        print(f"Batch {batch_val}  for {filetype} already processed , skipping")
+                        check = False
+                        continue  # Use continue for clarity
 
-                        else:
-                            logging.info(f"Starting batch {batch_val} for {filetype}")
-                            print(f"Starting batch {batch_val}")
-                            # df = files_df[filetype]
-                            df = read_json_files_to_dfs(files_info_path)
-                            df = df[filetype]
-                            check = azure_process_batch(
-                                df=df,
-                                batch_val=batch_val,
-                                filetype=filetype,
-                                datastore_name=datastore_name,
-                                storage_account_key=storage_account_key,
-                                local_folder_path=local_folder_path,
-                                destination_path=destination_path,
-                                create_data_asset=create_data_asset,
-                                data_asset_name=data_asset_name,
-                                processing_folder=processing_folder,  # Pass processing_folder
-                                data_asset_version=data_asset_version,
-                            )
+                    else:
+                        logging.info(f"Starting batch {batch_val} for {filetype}")
+                        print(f"Starting batch {batch_val}")
+                        #df = files_df[filetype]
+                        df = read_json_files_to_dfs(files_info_path)
+                        df = df[filetype]
+                        check = azure_process_batch(
+                            df=df,
+                            batch_val=batch_val,
+                            filetype=filetype,
+                            datastore_name=datastore_name,
+                            storage_account_key=storage_account_key,
+                            local_folder_path=local_folder_path,
+                            destination_path=destination_path,
+                            create_data_asset=create_data_asset,
+                            data_asset_name=data_asset_name,
+                            processing_folder=processing_folder,  # Pass processing_folder
+                            data_asset_version=data_asset_version,
+                        )
 
-                            if check:
+                        if check:
+                            if os.path.exists(processing_folder+"files_info/batch_logger/batch_logs.json"):
                                 batch_logs = pd.read_json(processing_folder+"files_info/batch_logger/batch_logs.json")
-                                batch_logs.loc[len(batch_logs)] = [filetype, batch_val]
-                                try:
-                                    os.makedirs(os.path.join(processing_folder, "files_info/batch_logger/"), exist_ok=True)
-                                    json_filename = os.path.join(processing_folder, f"files_info/batch_logger/batch_logs.json")
-                                    batch_logs.to_json(json_filename, orient="records", indent=4)
-                                    logging.info(f"Saved batch log to {json_filename}")
-                                except OSError as e:
-                                    raise OSError(f"Error saving batch logs to {json_filename}: {e}") from e
                             else:
-                                logging.error(f"Processing batch {batch_val} for {filetype} failed.")
-                                print(f"Processing batch {batch_val} for {filetype} failed.")
+                                batch_logs = pd.DataFrame(columns=['filetype', 'batch'])
+
+                            batch_logs.loc[len(batch_logs)] = [filetype, batch_val]
+                            try:
+                                os.makedirs(os.path.join(processing_folder, "files_info/batch_logger/"), exist_ok=True)
+                                json_filename = os.path.join(processing_folder, f"files_info/batch_logger/batch_logs.json")
+                                batch_logs.to_json(json_filename, orient="records", indent=4)
+                                logging.info(f"Saved batch log to {json_filename}")
+                            except OSError as e:
+                                raise OSError(f"Error saving batch logs to {json_filename}: {e}") from e
+                        else:
+                            logging.error(f"Processing batch {batch_val} for {filetype} failed.")
+                            print(f"Processing batch {batch_val} for {filetype} failed.")
+                            # Decide if you want to continue processing other batches/filetypes
+                            # or raise an exception here.  For now, I'll continue.
+                
+            else:
+                logging.info(f"No files for {filetype} filetype")
+                print(f"No files for {filetype} filetype")
+        else:
+            if filetype in batch_run.keys():
+                if not files_df[filetype].empty:
+                    logging.info(f"Processing {filetype} files")
+                    print(f"Processing {filetype} files")
+                    batches = files_df[filetype].batch.unique()
+                    batches_to_run = batch_run[filetype]
+
+                    for batch_val in batches:
+                        if batch_val in batches_to_run:                            
+                            if batch_val in list(batch_logs[batch_logs.filetype == filetype].batch): # use .values
+                                logging.info(f"Batch {batch_val} for {filetype} already processed, skipping.")
+                                print(f"Batch {batch_val}  for {filetype} already processed , skipping")
+                                check = False
+                                continue  # Use continue for clarity
+                            
+
+                            else:
+                                logging.info(f"Starting batch {batch_val} for {filetype}")
+                                print(f"Starting batch {batch_val}")
+                                # df = files_df[filetype]
+                                df = read_json_files_to_dfs(files_info_path)
+                                df = df[filetype]
+                                check = azure_process_batch(
+                                    df=df,
+                                    batch_val=batch_val,
+                                    filetype=filetype,
+                                    datastore_name=datastore_name,
+                                    storage_account_key=storage_account_key,
+                                    local_folder_path=local_folder_path,
+                                    destination_path=destination_path,
+                                    create_data_asset=create_data_asset,
+                                    data_asset_name=data_asset_name,
+                                    processing_folder=processing_folder,  # Pass processing_folder
+                                    data_asset_version=data_asset_version,
+                                )
+
+                                if check:
+                                    if os.path.exists(processing_folder+"files_info/batch_logger/batch_logs.json"):
+                                        batch_logs = pd.read_json(processing_folder+"files_info/batch_logger/batch_logs.json")
+                                    else:
+                                        batch_logs = pd.DataFrame(columns=['filetype', 'batch'])
+                                    batch_logs.loc[len(batch_logs)] = [filetype, batch_val]
+                                    try:
+                                        os.makedirs(os.path.join(processing_folder, "files_info/batch_logger/"), exist_ok=True)
+                                        json_filename = os.path.join(processing_folder, f"files_info/batch_logger/batch_logs.json")
+                                        batch_logs.to_json(json_filename, orient="records", indent=4)
+                                        logging.info(f"Saved batch log to {json_filename}")
+                                    except OSError as e:
+                                        raise OSError(f"Error saving batch logs to {json_filename}: {e}") from e
+                                else:
+                                    logging.error(f"Processing batch {batch_val} for {filetype} failed.")
+                                    print(f"Processing batch {batch_val} for {filetype} failed.")
+                else:
+                    logging.info(f"No files for {filetype} filetype")
+                    print(f"No files for {filetype} filetype")
                 
     logging.info("Batch processing completed.")
     print("Batch processing completed.")
@@ -1046,6 +1062,8 @@ def df_with_docling_json(
     files_df = read_json_files_to_dfs(processing_folder +"files_info/")
     df_list = []
     for key, val in files_df.items():
+        print(f"adding metadata information for {key} filetypes")
+        print("total files:", len(val))
         if key in file_types:
             val['data_asset'] = [{'data_asset_name':processed_data_asset_name,
                                 'data_asset_version':processed_data_asset_version}]*len(val)
@@ -1062,13 +1080,14 @@ def df_with_docling_json(
         return pd.DataFrame()
 
     df = pd.concat(df_list,ignore_index=True)
+    print(f"Collecting docling json files for {len(df)} files ")
     
     
     df['json_file'] = df.apply(lambda x: read_json_file(data_asset.path + x['rel_path_data_asset'] + os.path.splitext(x['filename'])[0]+".json")
                                     if x['uploaded'] == True else None, axis=1)
     df['processor'] = processor + "==" + version(processor)
-    df['tags'] = data_asset.tags
-    df.drop(columns = ['filepath','batch','processed','uploaded'], inplace=True)
+    df['tags'] = [data_asset.tags]*len(df)
+    df.drop(columns = ['filepath','batch'], inplace=True)
 
     
     if upload_df:  
